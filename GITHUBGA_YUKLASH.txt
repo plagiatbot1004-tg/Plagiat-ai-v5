@@ -1,0 +1,56 @@
+PLAGIAI PROFESSIONAL V5 QUETEXT - GITHUB VA RAILWAYGA YUKLASH
+================================================================
+
+1. ZIP fayl ustiga o‘ng tugma bosing va "Extract All" qiling.
+2. Ochilgan papka ichidagi HAMMA fayl va papkalarni GitHub repository ildiziga
+   yuklang. GitHub ichida main.py, requirements.txt, Dockerfile, railway.toml va
+   app papkasi bir qatorda ko‘rinishi kerak.
+3. ZIP faylning o‘zini GitHubga yuklamang va loyiha ichida ortiqcha tashqi papka
+   hosil qilmang.
+4. .env faylini, BOT_TOKEN, API kalit yoki parolni GitHubga yuklamang.
+
+RAILWAY VARIABLES
+-----------------
+
+BOT_TOKEN                 BotFather bergan token
+DATABASE_URL              PostgreSQL servisidan Add Reference orqali tanlanadi
+ADMIN_IDS                 Sizning raqamli Telegram ID raqamingiz
+MAX_FILE_MB               20
+MAX_TEXT_CHARS            200000
+QUETEXT_API_KEY           Quetext Account -> API Keys bo‘limidagi kalit
+QUETEXT_POLL_SECONDS      3 (ixtiyoriy)
+QUETEXT_TIMEOUT_SECONDS   240 (ixtiyoriy)
+
+PORT qiymatini Railway avtomatik beradi. Oldingi COPYLEAKS_EMAIL,
+COPYLEAKS_API_KEY, COPYLEAKS_SANDBOX, PUBLIC_BASE_URL va WEBHOOK_SECRET
+o‘zgaruvchilarini o‘chirish mumkin - V5 ulardan foydalanmaydi.
+
+QUETEXTNI YOQISH
+----------------
+
+1. https://www.quetext.com/ saytida hisob oching.
+2. Account -> API Keys bo‘limiga kiring va API key yarating.
+3. Kalitni Railway Variables ichidagi QUETEXT_API_KEY qiymatiga yozing.
+4. Railway deploy tugagach botga kamida 20 so‘zli TXT yoki DOCX yuboring.
+5. Bot Quetext holatini o‘zi so‘rab turadi; webhook va PUBLIC_BASE_URL kerak emas.
+
+Yangi API hisobida $5 yoki 50 000 so‘zlik sinov krediti mavjud. Plagiat
+tekshiruvi $0.10 / 1 000 so‘z. Inglizcha AI tekshiruvi ham alohida
+$0.10 / 1 000 so‘z. Ikkalasi birga ishlaganda taxminiy jami $0.20 / 1 000
+hujjat so‘zi bo‘ladi.
+
+TEKSHIRISH
+----------
+
+- Railway deploy logida Telegram polling va Uvicorn server ishga tushganini ko‘ring.
+- Brauzerda https://SIZNING-DOMENINGIZ/health manzilini oching.
+- Javobda status: ok va provider: Quetext chiqishi kerak.
+- Botda avval "Tekshiruv boshlandi", keyin PDF va yakuniy natija kelishi kerak.
+- Xatolik bo‘lsa Railway Deploy Logs rasmini yuboring; maxfiy tokenlarni yashiring.
+
+MUHIM
+-----
+
+Ichki o‘xshashlik funksiyasi yo‘q. O‘zbekcha AI-uslub balli "AI yozgan" degan
+isbot emas. Quetextning rasmiy til ro‘yxatida o‘zbek va rus tillari
+ko‘rsatilmagan; tashqi AI tekshiruvi hozir inglizcha matn uchun yoqilgan.

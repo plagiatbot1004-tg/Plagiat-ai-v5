@@ -1,0 +1,1 @@
+"""PlagiAI Telegram bot package."""
