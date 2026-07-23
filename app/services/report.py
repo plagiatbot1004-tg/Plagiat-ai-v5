@@ -219,7 +219,7 @@ def _page_decorator(regular: str, bold: str, report_id: str):
         canvas.drawRightString(
             width - 18 * mm,
             9 * mm,
-            f"V5.0 QUETEXT  |  {document.page}-sahifa",
+            f"V5.1 QUETEXT  |  {document.page}-sahifa",
         )
         canvas.restoreState()
 

@@ -1,4 +1,4 @@
-# PlagiAI Telegram Bot Professional V5 - Quetext
+# PlagiAI Telegram Bot Professional V5.1 - Quetext
 
 PlagiAI PDF, DOCX va TXT hujjatlardan matn ajratadi, Quetext DeepSearch API
 orqali ochiq internet va akademik veb manbalar bilan tekshiradi hamda yakuniy
@@ -31,7 +31,7 @@ professional PDF hisobot yaratadi. Ichki hujjatlar o‘xshashligi ishlatilmaydi.
 | `MAX_TEXT_CHARS` | `200000` |
 | `QUETEXT_API_KEY` | Quetext `Account > API Keys` bo‘limidagi kalit |
 | `QUETEXT_POLL_SECONDS` | Ixtiyoriy, standart `3` |
-| `QUETEXT_TIMEOUT_SECONDS` | Ixtiyoriy, standart `240` |
+| `QUETEXT_TIMEOUT_SECONDS` | Ixtiyoriy, standart `900` (15 daqiqa) |
 
 `PORT`ni Railway avtomatik beradi. Oldingi `COPYLEAKS_*`, `PUBLIC_BASE_URL` va
 `WEBHOOK_SECRET` qiymatlari V5 da ishlatilmaydi va o‘chirilishi mumkin.
@@ -53,11 +53,14 @@ ikkalasi ishlatilsa, umumiy narx 1 000 hujjat so‘zi uchun taxminan $0.20 bo‘
 
 1. Bot hujjatdan matn ajratadi va Quetext’ga plagiat so‘rovini yuboradi.
 2. Inglizcha matnda alohida AI so‘rovi ham yuboriladi.
-3. Bot har 3 soniyada hisobot holatini tekshiradi.
+3. Bot har 3 soniyada progress va yakuniy hisobot endpointlarini tekshiradi.
 4. Plagiat natijasi tayyor bo‘lgach manbalar va foizlar olinadi.
 5. AI natijasi mavjud bo‘lsa gaplar kesimidagi ehtimollar qo‘shiladi.
-6. Faqat shundan so‘ng Telegram xulosasi va bitta V5 PDF yuboriladi.
+6. Faqat shundan so‘ng Telegram xulosasi va bitta V5.1 PDF yuboriladi.
 7. Plagiat skani xato bersa tekshirilmagan PDF yaratilmaydi.
+
+V5.1 progress yozuvi kechiksa ham tayyor natijani bevosita hisobot endpointidan
+oladi. Standart kutish muddati 15 daqiqa; ko‘p hollarda natija ancha tez keladi.
 
 ## Til bo‘yicha izoh
 

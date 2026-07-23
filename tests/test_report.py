@@ -38,7 +38,7 @@ def test_v5_pdf_contains_only_completed_quetext_results() -> None:
     assert report.startswith(b"%PDF")
     text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(report)).pages)
     normalized = " ".join(text.split())
-    assert "V5.0 QUETEXT" in text
+    assert "V5.1 QUETEXT" in text
     assert "Quetext DeepSearch" in text
     assert "INTERNET ORIGINALLIGI" in text
     assert "ICHKI O‘XSHASHLIK" not in text

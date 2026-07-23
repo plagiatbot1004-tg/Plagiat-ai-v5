@@ -7,6 +7,7 @@ from app.config import Settings
 from app.services.quetext import (
     QuetextClient,
     QuetextError,
+    _progress_is_complete,
     parse_ai_report,
     parse_plagiarism_report,
 )
@@ -68,6 +69,18 @@ def test_ai_report_parses_sentence_level_probabilities() -> None:
     assert "91.00%" in result.reasons[1]
 
 
+def test_progress_parser_accepts_documented_and_compatible_shapes() -> None:
+    assert _progress_is_complete(
+        {"status": True, "data": [{"Progress": 1, "id": "report-1"}]}
+    )
+    assert _progress_is_complete(
+        {"status": True, "data": {"progress": 100, "status": "completed"}}
+    )
+    assert not _progress_is_complete(
+        {"status": True, "data": [{"Progress": 0.75, "id": "report-1"}]}
+    )
+
+
 async def test_client_uses_api_key_submits_and_polls() -> None:
     requests: list[httpx.Request] = []
 
@@ -105,6 +118,60 @@ async def test_client_uses_api_key_submits_and_polls() -> None:
     submitted = json.loads(requests[0].content)
     assert submitted["title"] == "paper.docx"
     assert "sufficiently long" in submitted["text"]
+
+
+async def test_client_reads_completed_report_when_progress_is_stale(monkeypatch) -> None:
+    result_reads = 0
+
+    async def no_wait(_: float) -> None:
+        return None
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal result_reads
+        path = request.url.path
+        if path == "/api/v2/report/report-stale":
+            result_reads += 1
+            if result_reads == 1:
+                return httpx.Response(
+                    409,
+                    json={
+                        "status": False,
+                        "code": 409,
+                        "message": "Report is still processing.",
+                    },
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "status": True,
+                    "data": {
+                        "id": "report-stale",
+                        "status": "completed",
+                        "percentage": 100,
+                        "score": 7.5,
+                        "matches": [],
+                    },
+                },
+            )
+        if path == "/api/v2/report-progress/report-stale":
+            return httpx.Response(
+                200,
+                json={"status": True, "data": [{"Progress": 0.25}]},
+            )
+        return httpx.Response(404, json={"status": False, "code": 404})
+
+    monkeypatch.setattr("app.services.quetext.asyncio.sleep", no_wait)
+    settings = Settings(
+        BOT_TOKEN="123456:TEST",
+        QUETEXT_API_KEY="secret-key",
+    )
+    client = QuetextClient(settings, transport=httpx.MockTransport(handler))
+
+    result = await client.get_plagiarism_result("report-stale")
+
+    assert result.similarity == 7.5
+    assert result.originality == 92.5
+    assert result_reads == 2
 
 
 async def test_insufficient_credit_error_is_actionable() -> None:

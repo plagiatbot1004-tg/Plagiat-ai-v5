@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import math
 from dataclasses import dataclass, field
 from typing import Any
@@ -9,6 +10,7 @@ import httpx
 from app.config import Settings
 
 QUETEXT_API_BASE = "https://www.quetext.com/api/v2"
+logger = logging.getLogger(__name__)
 
 
 class QuetextError(RuntimeError):
@@ -95,6 +97,55 @@ def _response_data(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise QuetextError("Quetext kutilmagan javob formatini qaytardi.")
     return data
+
+
+def _status_is_complete(value: Any) -> bool:
+    normalized = str(value or "").strip().casefold().replace("_", "-")
+    return normalized in {"complete", "completed", "done", "finished"}
+
+
+def _progress_is_complete(payload: dict[str, Any]) -> bool:
+    data = payload.get("data")
+    rows: list[dict[str, Any]] = []
+    if isinstance(data, list):
+        rows = [item for item in data if isinstance(item, dict)]
+    elif isinstance(data, dict):
+        rows = [data]
+
+    for row in rows:
+        if _status_is_complete(row.get("status") or row.get("Status")):
+            return True
+        raw_progress = (
+            row.get("Progress")
+            if row.get("Progress") is not None
+            else row.get("progress")
+        )
+        try:
+            parsed_progress = float(raw_progress)
+        except (TypeError, ValueError):
+            continue
+        # The progress endpoint documents a 0..1 scale, but accepting 100 also
+        # keeps the client compatible with percentage-style responses.
+        if parsed_progress >= 1.0:
+            return True
+    return False
+
+
+def _result_is_complete(payload: dict[str, Any], *, score_field: str) -> bool:
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return False
+    if _status_is_complete(data.get("status") or data.get("Status")):
+        return True
+    try:
+        percentage = float(data.get("percentage"))
+    except (TypeError, ValueError):
+        percentage = 0.0
+    if percentage >= 100:
+        return True
+    # Quetext documents the final score as null while processing. This fallback
+    # handles completed reports whose status/progress fields are omitted.
+    return score_field in data and data.get(score_field) is not None
 
 
 def parse_plagiarism_report(payload: dict[str, Any]) -> InternetScanResult:
@@ -284,32 +335,69 @@ class QuetextClient:
     async def submit_ai(self, *, text: str, title: str) -> str:
         return await self._submit("/ai-detect-report", text=text, title=title)
 
-    async def _wait_until_complete(self, report_id: str) -> None:
+    async def _wait_for_result(
+        self,
+        report_id: str,
+        *,
+        result_path: str,
+        score_field: str,
+    ) -> dict[str, Any]:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self.settings.quetext_timeout_seconds
+        last_progress_complete = False
         while loop.time() < deadline:
-            payload = await self._request(
-                "GET",
-                f"/report-progress/{report_id}",
-                attempts=2,
-            )
-            data = payload.get("data")
-            if isinstance(data, list) and data:
-                raw_progress = data[0].get("Progress") if isinstance(data[0], dict) else None
-                try:
-                    parsed_progress = float(raw_progress)
-                except (TypeError, ValueError):
-                    parsed_progress = 0.0
-                if parsed_progress >= 1.0:
-                    return
+            # Reading the final endpoint as well as the progress endpoint avoids
+            # false timeouts when Quetext has completed a report but its progress
+            # record is delayed or stale.
+            try:
+                result_payload = await self._request(
+                    "GET",
+                    result_path,
+                    attempts=2,
+                )
+            except QuetextError as exc:
+                if exc.status_code not in {404, 409, 429, 500, 502, 503, 504}:
+                    raise
+            else:
+                if _result_is_complete(result_payload, score_field=score_field):
+                    return result_payload
+
+            try:
+                progress_payload = await self._request(
+                    "GET",
+                    f"/report-progress/{report_id}",
+                    attempts=2,
+                )
+            except QuetextError as exc:
+                if exc.status_code not in {404, 409, 429, 500, 502, 503, 504}:
+                    raise
+            else:
+                progress_complete = _progress_is_complete(progress_payload)
+                if progress_complete and not last_progress_complete:
+                    logger.info("Quetext report %s reached completed progress", report_id)
+                last_progress_complete = progress_complete
             await asyncio.sleep(self.settings.quetext_poll_seconds)
+
+        # One last direct read prevents a report that completed on the deadline
+        # boundary from being marked as timed out.
+        try:
+            result_payload = await self._request("GET", result_path, attempts=2)
+        except QuetextError as exc:
+            if exc.status_code not in {404, 409, 429, 500, 502, 503, 504}:
+                raise
+        else:
+            if _result_is_complete(result_payload, score_field=score_field):
+                return result_payload
         raise QuetextTimeoutError(
             "Quetext tekshiruvi belgilangan vaqt ichida yakunlanmadi."
         )
 
     async def get_plagiarism_result(self, report_id: str) -> InternetScanResult:
-        await self._wait_until_complete(report_id)
-        payload = await self._request("GET", f"/report/{report_id}")
+        payload = await self._wait_for_result(
+            report_id,
+            result_path=f"/report/{report_id}",
+            score_field="score",
+        )
         return parse_plagiarism_report(payload)
 
     async def get_ai_result(
@@ -318,6 +406,9 @@ class QuetextClient:
         *,
         language: str,
     ) -> ExternalAIAssessment:
-        await self._wait_until_complete(report_id)
-        payload = await self._request("GET", f"/ai-detect-report/{report_id}")
+        payload = await self._wait_for_result(
+            report_id,
+            result_path=f"/ai-detect-report/{report_id}",
+            score_field="ai_score",
+        )
         return parse_ai_report(payload, language=language)

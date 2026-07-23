@@ -1,4 +1,4 @@
-PLAGIAI PROFESSIONAL V5 QUETEXT - GITHUB VA RAILWAYGA YUKLASH
+PLAGIAI PROFESSIONAL V5.1 QUETEXT - GITHUB VA RAILWAYGA YUKLASH
 ================================================================
 
 1. ZIP fayl ustiga o‘ng tugma bosing va "Extract All" qiling.
@@ -19,7 +19,7 @@ MAX_FILE_MB               20
 MAX_TEXT_CHARS            200000
 QUETEXT_API_KEY           Quetext Account -> API Keys bo‘limidagi kalit
 QUETEXT_POLL_SECONDS      3 (ixtiyoriy)
-QUETEXT_TIMEOUT_SECONDS   240 (ixtiyoriy)
+QUETEXT_TIMEOUT_SECONDS   900 (ixtiyoriy)
 
 PORT qiymatini Railway avtomatik beradi. Oldingi COPYLEAKS_EMAIL,
 COPYLEAKS_API_KEY, COPYLEAKS_SANDBOX, PUBLIC_BASE_URL va WEBHOOK_SECRET

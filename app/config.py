@@ -18,10 +18,10 @@ class Settings(BaseSettings):
         le=30.0,
     )
     quetext_timeout_seconds: int = Field(
-        default=240,
+        default=900,
         alias="QUETEXT_TIMEOUT_SECONDS",
         ge=30,
-        le=900,
+        le=3600,
     )
     port: int = Field(default=8080, alias="PORT", ge=1, le=65535)
 
