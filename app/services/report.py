@@ -1,5 +1,8 @@
 import hashlib
+import base64
+import os
 from datetime import datetime
+from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 from xml.sax.saxutils import escape, quoteattr
@@ -9,6 +12,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
@@ -37,6 +41,24 @@ PAPER = colors.HexColor("#FFFEF8")
 PALE_TURQUOISE = colors.HexColor("#F0F8F6")
 PALE_GOLD = colors.HexColor("#FBF7EC")
 PALE_RED = colors.HexColor("#FCF4F2")
+
+
+@lru_cache(maxsize=1)
+def _brand_logo_bytes() -> bytes | None:
+    """Load the official PLAG AI UZ logo; the report remains usable if the asset is absent."""
+    override = os.getenv("PLAGIAI_LOGO_FILE", "").strip()
+    if override:
+        path = Path(override)
+        if path.is_file():
+            return path.read_bytes()
+
+    encoded_path = Path(__file__).resolve().parents[1] / "assets" / "plagai_logo.png.b64"
+    if not encoded_path.is_file():
+        return None
+    try:
+        return base64.b64decode(encoded_path.read_text(encoding="ascii"), validate=True)
+    except (OSError, ValueError):
+        return None
 
 
 def _fonts() -> tuple[str, str, str]:
@@ -217,18 +239,28 @@ def _report_id(filename: str, checked_at: datetime) -> str:
     return hashlib.sha256(source).hexdigest()[:12].upper()
 
 
-def _draw_rosette(canvas, x: float, y: float, size: float) -> None:
+def _draw_step_motif(canvas, x: float, y: float, size: float) -> None:
+    """Minimal stepped textile motif with no star-shaped geometry."""
     canvas.saveState()
     canvas.translate(x, y)
     canvas.setStrokeColor(TURQUOISE)
     canvas.setLineWidth(0.35)
-    for angle in (0, 45):
-        canvas.saveState()
-        canvas.rotate(angle)
-        canvas.rect(-size / 2, -size / 2, size, size, stroke=1, fill=0)
-        canvas.restoreState()
-    canvas.setFillColor(GOLD)
-    canvas.circle(0, 0, size * 0.09, stroke=0, fill=1)
+    upper = canvas.beginPath()
+    upper.moveTo(-size, 0)
+    upper.lineTo(-size * 0.5, size * 0.34)
+    upper.lineTo(0, 0)
+    upper.lineTo(size * 0.5, size * 0.34)
+    upper.lineTo(size, 0)
+    canvas.drawPath(upper, stroke=1, fill=0)
+    canvas.setStrokeColor(GOLD)
+    canvas.setLineWidth(0.28)
+    lower = canvas.beginPath()
+    lower.moveTo(-size * 0.72, -size * 0.27)
+    lower.lineTo(-size * 0.34, -size * 0.04)
+    lower.lineTo(0, -size * 0.27)
+    lower.lineTo(size * 0.34, -size * 0.04)
+    lower.lineTo(size * 0.72, -size * 0.27)
+    canvas.drawPath(lower, stroke=1, fill=0)
     canvas.restoreState()
 
 
@@ -240,15 +272,28 @@ def _page_decorator(regular: str, bold: str, report_id: str):
         canvas.rect(0, 0, width, height, stroke=0, fill=1)
         canvas.setStrokeColor(GOLD)
         canvas.setLineWidth(0.5)
-        canvas.line(18 * mm, height - 13 * mm, width - 18 * mm, height - 13 * mm)
-        _draw_rosette(canvas, 20.5 * mm, height - 13 * mm, 3.2 * mm)
-        _draw_rosette(canvas, width - 20.5 * mm, height - 13 * mm, 3.2 * mm)
-        canvas.setFont(bold, 8)
-        canvas.setFillColor(NAVY)
-        canvas.drawString(18 * mm, height - 9.5 * mm, "PLAGIAI  •  AKADEMIK HALOLLIK")
+        canvas.line(18 * mm, height - 21 * mm, width - 18 * mm, height - 21 * mm)
+        _draw_step_motif(canvas, 20.5 * mm, height - 21 * mm, 2.5 * mm)
+        _draw_step_motif(canvas, width - 20.5 * mm, height - 21 * mm, 2.5 * mm)
+        logo = _brand_logo_bytes()
+        if logo:
+            canvas.drawImage(
+                ImageReader(BytesIO(logo)),
+                14 * mm,
+                height - 19 * mm,
+                width=38 * mm,
+                height=19.8 * mm,
+                preserveAspectRatio=True,
+                anchor="c",
+                mask="auto",
+            )
+        else:
+            canvas.setFont(bold, 8)
+            canvas.setFillColor(NAVY)
+            canvas.drawString(18 * mm, height - 11 * mm, "PLAG AI UZ  •  AKADEMIK HALOLLIK")
         canvas.setFont(regular, 7)
         canvas.setFillColor(MUTED)
-        canvas.drawRightString(width - 18 * mm, height - 9.5 * mm, f"Hisobot № {report_id}")
+        canvas.drawRightString(width - 18 * mm, height - 11 * mm, f"Hisobot № {report_id}")
         canvas.setStrokeColor(GOLD)
         canvas.line(18 * mm, 13 * mm, width - 18 * mm, 13 * mm)
         canvas.drawString(18 * mm, 9 * mm, "Elektron hujjat  •  Akademik ekspertiza uchun")
@@ -291,7 +336,7 @@ def build_report(
         pagesize=A4,
         rightMargin=18 * mm,
         leftMargin=18 * mm,
-        topMargin=17 * mm,
+        topMargin=25 * mm,
         bottomMargin=16 * mm,
         title=f"PlagiAI professional hisoboti — {filename}",
         author="PlagiAI Professional",
