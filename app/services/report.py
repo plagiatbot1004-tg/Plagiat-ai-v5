@@ -1,7 +1,7 @@
-import hashlib
 import base64
+import hashlib
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
@@ -26,6 +26,7 @@ from reportlab.platypus import (
 
 from app.services.ai_risk import AIStyleAssessment, language_name
 from app.services.assessment import build_professional_conclusion
+from app.services.internal_similarity import MultiSourceResult
 from app.services.quetext import InternetScanResult
 
 NAVY = colors.HexColor("#123B5D")
@@ -56,7 +57,8 @@ def _brand_logo_bytes() -> bytes | None:
     if not encoded_path.is_file():
         return None
     try:
-        return base64.b64decode(encoded_path.read_text(encoding="ascii"), validate=True)
+        encoded = encoded_path.read_text(encoding="ascii").strip()
+        return base64.b64decode(encoded, validate=True)
     except (OSError, ValueError):
         return None
 
@@ -206,13 +208,14 @@ def _metric_card(
     label: str,
     styles: dict[str, ParagraphStyle],
     background: colors.Color,
+    width: float = 56 * mm,
 ) -> Table:
     card = Table(
         [
             [Paragraph(escape(value), styles["metric_value"])],
             [Paragraph(escape(label), styles["metric_label"])],
         ],
-        colWidths=[56 * mm],
+        colWidths=[width],
         rowHeights=[9 * mm, 6.5 * mm],
     )
     card.setStyle(
@@ -300,7 +303,7 @@ def _page_decorator(regular: str, bold: str, report_id: str):
         canvas.drawRightString(
             width - 18 * mm,
             9 * mm,
-            f"V5.1 QUETEXT  |  {document.page}-sahifa",
+            f"V6 MULTI-SOURCE  |  {document.page}-sahifa",
         )
         canvas.restoreState()
 
@@ -314,6 +317,7 @@ def build_report(
     internet_result: InternetScanResult | None = None,
     ai_assessment: AIStyleAssessment | None = None,
     authorship_questions: list[str] | None = None,
+    multi_source_result: MultiSourceResult | None = None,
 ) -> bytes:
     if (
         internet_result is None
@@ -325,10 +329,29 @@ def build_report(
             "Yakuniy PDF faqat muvaffaqiyatli internet tekshiruvidan keyin yaratiladi."
         )
 
-    checked_at = checked_at or datetime.now()
+    checked_at = checked_at or datetime.now(UTC)
+    if multi_source_result is None:
+        multi_source_result = MultiSourceResult(
+            internet_similarity=float(internet_result.similarity),
+            internal_similarity=0.0,
+            combined_similarity=float(internet_result.similarity),
+            combined_originality=float(internet_result.originality),
+            internet_matched_words=round(word_count * float(internet_result.similarity) / 100.0),
+            internal_matched_words=0,
+            deduplicated_matched_words=round(
+                word_count * float(internet_result.similarity) / 100.0
+            ),
+            total_words=word_count,
+            internal_sources=[],
+        )
     regular, bold, display = _fonts()
     styles = _styles(regular, bold, display)
-    conclusion = build_professional_conclusion(internet_result, ai_assessment)
+    conclusion = build_professional_conclusion(
+        internet_result,
+        ai_assessment,
+        overall_similarity=multi_source_result.combined_similarity,
+        internal_similarity=multi_source_result.internal_similarity,
+    )
     report_id = _report_id(filename, checked_at)
     buffer = BytesIO()
     document = SimpleDocTemplate(
@@ -340,17 +363,17 @@ def build_report(
         bottomMargin=16 * mm,
         title=f"PlagiAI professional hisoboti — {filename}",
         author="PlagiAI Professional",
-        subject="Internet plagiati va AI yordamida yozilgan matn indikatori",
+        subject="Internet, akademik va PlagAI ichki bazasi bo‘yicha o‘xshashlik hisoboti",
     )
 
     detected_language = ai_assessment.language if ai_assessment else "unknown"
-    scan_mode = "QUETEXT REAL API - DEEPSEARCH"
+    scan_mode = "QUETEXT DEEPSEARCH + PLAGAI INTERNAL DATABASE"
     story: list[object] = [
         Spacer(1, 0.8 * mm),
         Paragraph("TO‘LIQ TEKSHIRUV HISOBOTI", styles["title"]),
         Paragraph(
-            "Hujjatning tashqi manbalar bilan o‘xshashligi, topilgan mos fragmentlar "
-            "va AI indikatori bo‘yicha elektron qayd",
+            "Internet, akademik manbalar va PlagAI ichki hujjatlar bazasi bilan "
+            "o‘xshashlik, mos fragmentlar va AI indikatori bo‘yicha elektron qayd",
             styles["subtitle"],
         ),
     ]
@@ -432,25 +455,41 @@ def build_report(
         if not ai_assessment or ai_assessment.score is None
         else f"{ai_assessment.score:.1f}%"
     )
+    card_width = 41.5 * mm
     metrics = Table(
         [
             [
                 _metric_card(
-                    f"{internet_result.originality:.2f}%",
-                    "INTERNET ORIGINALLIGI",
+                    f"{multi_source_result.combined_originality:.2f}%",
+                    "UMUMIY ORIGINALLIK",
                     styles,
                     PAPER,
+                    card_width,
                 ),
                 _metric_card(
-                    f"{internet_result.similarity:.2f}%",
-                    "INTERNET O‘XSHASHLIGI",
+                    f"{multi_source_result.combined_similarity:.2f}%",
+                    "UMUMIY O‘XSHASHLIK",
                     styles,
                     PAPER,
+                    card_width,
                 ),
-                _metric_card(ai_value, "AI INDIKATORI", styles, PAPER),
+                _metric_card(
+                    f"{multi_source_result.internet_similarity:.2f}%",
+                    "INTERNET / AKADEMIK",
+                    styles,
+                    PAPER,
+                    card_width,
+                ),
+                _metric_card(
+                    f"{multi_source_result.internal_similarity:.2f}%",
+                    "PLAGAI ICHKI BAZA",
+                    styles,
+                    PAPER,
+                    card_width,
+                ),
             ]
         ],
-        colWidths=[58 * mm] * 3,
+        colWidths=[43.5 * mm] * 4,
     )
     metrics.setStyle(
         TableStyle(
@@ -466,6 +505,12 @@ def build_report(
     story.extend(
         [
             metrics,
+            Paragraph(
+                f"AI indikatori: <b>{escape(ai_value)}</b>  •  "
+                f"Takrorlanmaydigan mos so‘zlar: "
+                f"<b>{multi_source_result.deduplicated_matched_words:,}</b>",
+                styles["small"],
+            ),
             Paragraph("1. Internet manbalari bo‘yicha natija", styles["heading"]),
             Paragraph(
                 f"Quetext DeepSearch tashqi skani yakunlandi. {len(internet_result.sources)} ta "
@@ -535,7 +580,61 @@ def build_report(
             )
         )
 
-    story.append(Paragraph("2. AI yordamida yozilgan matn indikatori", styles["heading"]))
+    story.append(Paragraph("2. PlagAI ichki hujjatlar bazasi", styles["heading"]))
+    if multi_source_result.internal_sources:
+        internal_rows: list[list[object]] = [
+            [
+                Paragraph("№", styles["table_bold"]),
+                Paragraph("ICHKI MANBA", styles["table_bold"]),
+                Paragraph("MOSLIK", styles["table_bold"]),
+                Paragraph("MOS FRAGMENT", styles["table_bold"]),
+            ]
+        ]
+        row_number = 1
+        for source in multi_source_result.internal_sources:
+            for match in source.matches:
+                internal_rows.append(
+                    [
+                        Paragraph(str(row_number), styles["table"]),
+                        Paragraph(escape(source.label), styles["table_bold"]),
+                        Paragraph(
+                            f"{match.matched_words} so‘z<br/><b>{source.similarity:.2f}%</b>",
+                            styles["table"],
+                        ),
+                        Paragraph(escape(match.text) or "-", styles["table"]),
+                    ]
+                )
+                row_number += 1
+        internal_table = LongTable(
+            internal_rows,
+            colWidths=[8 * mm, 54 * mm, 25 * mm, 87 * mm],
+            repeatRows=1,
+        )
+        internal_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), PALE_GOLD),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), NAVY),
+                    ("BOX", (0, 0), (-1, -1), 0.5, BORDER),
+                    ("INNERGRID", (0, 0), (-1, -1), 0.3, BORDER),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ]
+            )
+        )
+        story.append(internal_table)
+    else:
+        story.append(
+            Paragraph(
+                "Oldingi PlagAI hujjatlarida kamida 8 so‘zli ishonchli mos fragment topilmadi.",
+                styles["body"],
+            )
+        )
+
+    story.append(Paragraph("3. AI yordamida yozilgan matn indikatori", styles["heading"]))
     if ai_assessment is None:
         story.append(
             Paragraph(
@@ -588,12 +687,12 @@ def build_report(
             story.append(Paragraph(f"• {escape(reason)}", styles["body"]))
         story.append(Paragraph(f"<i>{escape(ai_assessment.disclaimer)}</i>", styles["small"]))
 
-    story.append(Paragraph("3. Ekspert tavsiyalari", styles["heading"]))
+    story.append(Paragraph("4. Ekspert tavsiyalari", styles["heading"]))
     for number, recommendation in enumerate(conclusion.recommendations, start=1):
         story.append(Paragraph(f"<b>{number}.</b> {escape(recommendation)}", styles["body"]))
 
     if authorship_questions:
-        story.append(Paragraph("4. Mualliflikni tekshirish savollari", styles["heading"]))
+        story.append(Paragraph("5. Mualliflikni tekshirish savollari", styles["heading"]))
         question_lines = "<br/>".join(
             f"<b>{number}.</b> {escape(question)}"
             for number, question in enumerate(authorship_questions[:3], start=1)
