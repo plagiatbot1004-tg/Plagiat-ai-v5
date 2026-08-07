@@ -41,8 +41,9 @@ def test_v6_pdf_contains_completed_multisource_sections() -> None:
     assert "V6 MULTI-SOURCE" in text
     assert "Quetext DeepSearch" in text
     assert "UMUMIY ORIGINALLIK" in text
-    assert "PLAGAI ICHKI BAZA" in text
-    assert "PlagAI ichki hujjatlar bazasi" in text
+    assert "PLAGAI ICHKI BAZA" not in text
+    assert "PlagAI ichki hujjatlar bazasi" not in text
+    assert "Takrorlanmaydigan mos so‘zlar" not in text
     assert "Internet tekshiruvi yakunlanmadi" not in normalized
 
 
