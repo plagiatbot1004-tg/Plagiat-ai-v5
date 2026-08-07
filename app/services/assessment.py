@@ -29,7 +29,6 @@ def build_professional_conclusion(
     ai: AIStyleAssessment | None,
     *,
     overall_similarity: float | None = None,
-    internal_similarity: float = 0.0,
 ) -> ProfessionalConclusion:
     if internet.status != "completed" or internet.similarity is None:
         raise ValueError("Professional xulosa faqat yakunlangan tashqi skan uchun yaratiladi.")
@@ -51,11 +50,9 @@ def build_professional_conclusion(
         status_label="TEKSHIRUV YAKUNLANDI",
         headline=f"Umumiy o‘xshashlik darajasi: {level}",
         conclusion=(
-            f"Internet va akademik veb manbalarda {internet.similarity:.2f}%, "
-            f"PlagAI ichki hujjatlar bazasida {internal_similarity:.2f}% o‘xshashlik "
-            f"aniqlandi. Ustma-ust fragmentlar bir marta hisoblanganda umumiy "
-            f"o‘xshashlik {score:.2f}% bo‘ldi. {interpretation}"
+            f"Internet va akademik veb manbalar bo‘yicha tekshiruv yakunlandi. "
+            f"Umumiy o‘xshashlik {score:.2f}% bo‘ldi. {interpretation}"
         ),
-        evidence_level="Quetext DeepSearch + PlagAI ichki baza dalillari",
+        evidence_level="Quetext DeepSearch dalillari",
         recommendations=recommendations[:4],
     )
