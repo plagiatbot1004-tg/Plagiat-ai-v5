@@ -1,7 +1,10 @@
 import json
+import base64
+import os
 import secrets
 import uuid
 from datetime import UTC, datetime
+from functools import lru_cache
 from html import escape as html_escape
 from io import BytesIO
 from pathlib import Path
@@ -16,6 +19,7 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import Image as RLImage
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -33,6 +37,35 @@ BORDER = colors.HexColor("#D8D2C4")
 PAPER = colors.HexColor("#FFFEF8")
 PALE_TURQUOISE = colors.HexColor("#F0F8F6")
 PALE_GOLD = colors.HexColor("#FBF7EC")
+
+
+@lru_cache(maxsize=1)
+def _brand_logo_bytes() -> bytes | None:
+    """Load the official PLAG AI UZ logo without making it a hard runtime dependency."""
+    override = os.getenv("PLAGIAI_LOGO_FILE", "").strip()
+    if override:
+        path = Path(override)
+        if path.is_file():
+            return path.read_bytes()
+
+    encoded_path = Path(__file__).resolve().parents[1] / "assets" / "plagai_logo.png.b64"
+    if not encoded_path.is_file():
+        return None
+    try:
+        return base64.b64decode(encoded_path.read_text(encoding="ascii"), validate=True)
+    except (OSError, ValueError):
+        return None
+
+
+def _brand_logo_flowable(max_width: float = 44 * mm) -> RLImage | None:
+    logo = _brand_logo_bytes()
+    if not logo:
+        return None
+    image = RLImage(BytesIO(logo))
+    scale = max_width / image.imageWidth
+    image.drawWidth = max_width
+    image.drawHeight = image.imageHeight * scale
+    return image
 
 
 def _fonts() -> tuple[str, str, str]:
@@ -72,19 +105,28 @@ def _fonts() -> tuple[str, str, str]:
     return regular, bold, display
 
 
-def _draw_rosette(canvas, x: float, y: float, size: float) -> None:
-    """Small eight-point geometric motif inspired by traditional girih work."""
+def _draw_step_motif(canvas, x: float, y: float, size: float) -> None:
+    """Minimal stepped textile motif with no star-shaped geometry."""
     canvas.saveState()
     canvas.translate(x, y)
     canvas.setLineWidth(0.45)
     canvas.setStrokeColor(TURQUOISE)
-    for angle in (0, 45):
-        canvas.saveState()
-        canvas.rotate(angle)
-        canvas.rect(-size / 2, -size / 2, size, size, stroke=1, fill=0)
-        canvas.restoreState()
-    canvas.setFillColor(GOLD)
-    canvas.circle(0, 0, size * 0.09, stroke=0, fill=1)
+    upper = canvas.beginPath()
+    upper.moveTo(-size, 0)
+    upper.lineTo(-size * 0.5, size * 0.34)
+    upper.lineTo(0, 0)
+    upper.lineTo(size * 0.5, size * 0.34)
+    upper.lineTo(size, 0)
+    canvas.drawPath(upper, stroke=1, fill=0)
+    canvas.setStrokeColor(GOLD)
+    canvas.setLineWidth(0.32)
+    lower = canvas.beginPath()
+    lower.moveTo(-size * 0.72, -size * 0.27)
+    lower.lineTo(-size * 0.34, -size * 0.04)
+    lower.lineTo(0, -size * 0.27)
+    lower.lineTo(size * 0.34, -size * 0.04)
+    lower.lineTo(size * 0.72, -size * 0.27)
+    canvas.drawPath(lower, stroke=1, fill=0)
     canvas.restoreState()
 
 
@@ -102,8 +144,8 @@ def _decorate_certificate(canvas, _doc, page_size: tuple[float, float]) -> None:
     canvas.setLineWidth(0.35)
     canvas.rect(8.2 * mm, 8.2 * mm, width - 16.4 * mm, height - 16.4 * mm, stroke=1, fill=0)
 
-    # A narrow ornamental frieze gives Uzbek character without turning the
-    # certificate into an illustration or a generated-looking template.
+    # A narrow stepped textile-style frieze gives Uzbek character while staying
+    # formal and deliberately avoiding star-shaped ornaments.
     y_top = height - 11.8 * mm
     y_bottom = 11.8 * mm
     canvas.setStrokeColor(GOLD)
@@ -113,15 +155,15 @@ def _decorate_certificate(canvas, _doc, page_size: tuple[float, float]) -> None:
     step = 16 * mm
     x = 20 * mm
     while x <= width - 20 * mm:
-        _draw_rosette(canvas, x, y_top, 3.2 * mm)
-        _draw_rosette(canvas, x, y_bottom, 3.2 * mm)
+        _draw_step_motif(canvas, x, y_top, 2.5 * mm)
+        _draw_step_motif(canvas, x, y_bottom, 2.5 * mm)
         x += step
 
-    # Quiet corner accents based on the same geometric vocabulary.
-    _draw_rosette(canvas, 11.2 * mm, height - 11.2 * mm, 4.2 * mm)
-    _draw_rosette(canvas, width - 11.2 * mm, height - 11.2 * mm, 4.2 * mm)
-    _draw_rosette(canvas, 11.2 * mm, 11.2 * mm, 4.2 * mm)
-    _draw_rosette(canvas, width - 11.2 * mm, 11.2 * mm, 4.2 * mm)
+    # Small matching corner marks; no rosettes or stars.
+    _draw_step_motif(canvas, 11.2 * mm, height - 11.2 * mm, 2.6 * mm)
+    _draw_step_motif(canvas, width - 11.2 * mm, height - 11.2 * mm, 2.6 * mm)
+    _draw_step_motif(canvas, 11.2 * mm, 11.2 * mm, 2.6 * mm)
+    _draw_step_motif(canvas, width - 11.2 * mm, 11.2 * mm, 2.6 * mm)
     canvas.restoreState()
 
 
@@ -241,11 +283,16 @@ def build_certificate_pdf(certificate: Certificate, verify_url: str) -> bytes:
     )
     issued = certificate.issued_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
     recipient = certificate.recipient_name.strip() or "Telegram foydalanuvchisi"
+    brand_logo = _brand_logo_flowable()
+    brand_cell = brand_logo or Paragraph(
+        "<b>PLAG AI UZ</b><br/><font size='7'>AKADEMIK HALOLLIK TIZIMI</font>",
+        body_bold,
+    )
 
     story = [
         Table(
             [[
-                Paragraph("<b>PLAGIAI</b><br/><font size='7'>AKADEMIK HALOLLIK TIZIMI</font>", body_bold),
+                brand_cell,
                 Paragraph("O‘ZBEKISTON  •  ELEKTRON HUJJAT", small),
                 Paragraph(
                     f"HOLATI: <b>{status_text}</b><br/>"
@@ -256,6 +303,7 @@ def build_certificate_pdf(certificate: Certificate, verify_url: str) -> bytes:
             colWidths=[74 * mm, 72 * mm, 115 * mm],
             style=TableStyle([
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (0, 0), 0),
                 ("ALIGN", (1, 0), (1, 0), "CENTER"),
                 ("ALIGN", (2, 0), (2, 0), "RIGHT"),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
