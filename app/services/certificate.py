@@ -23,19 +23,19 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.config import Settings
 from app.models import Certificate, ExternalScan, Submission, User
 
-NAVY = colors.HexColor("#0B1F3A")
-BLUE = colors.HexColor("#1D4ED8")
-CYAN = colors.HexColor("#0891B2")
-GREEN = colors.HexColor("#15803D")
-SLATE = colors.HexColor("#475569")
-MUTED = colors.HexColor("#64748B")
-BORDER = colors.HexColor("#CBD5E1")
-PALE_BLUE = colors.HexColor("#EFF6FF")
-PALE_GREEN = colors.HexColor("#ECFDF5")
-PALE_SLATE = colors.HexColor("#F8FAFC")
+NAVY = colors.HexColor("#123B5D")
+TURQUOISE = colors.HexColor("#1F8E8A")
+GOLD = colors.HexColor("#B88A3B")
+GREEN = colors.HexColor("#2E6D54")
+SLATE = colors.HexColor("#384A55")
+MUTED = colors.HexColor("#6C7A80")
+BORDER = colors.HexColor("#D8D2C4")
+PAPER = colors.HexColor("#FFFEF8")
+PALE_TURQUOISE = colors.HexColor("#F0F8F6")
+PALE_GOLD = colors.HexColor("#FBF7EC")
 
 
-def _fonts() -> tuple[str, str]:
+def _fonts() -> tuple[str, str, str]:
     regular_paths = (
         Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
         Path("/usr/share/fonts/dejavu/DejaVuSans.ttf"),
@@ -44,8 +44,13 @@ def _fonts() -> tuple[str, str]:
         Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
         Path("/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf"),
     )
+    display_paths = (
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"),
+        Path("/usr/share/fonts/dejavu/DejaVuSerif-Bold.ttf"),
+    )
     regular = "Helvetica"
     bold = "Helvetica-Bold"
+    display = bold
     for path in regular_paths:
         if path.exists():
             if "PlagiAI-Cert-Regular" not in pdfmetrics.getRegisteredFontNames():
@@ -58,7 +63,66 @@ def _fonts() -> tuple[str, str]:
                 pdfmetrics.registerFont(TTFont("PlagiAI-Cert-Bold", str(path)))
             bold = "PlagiAI-Cert-Bold"
             break
-    return regular, bold
+    for path in display_paths:
+        if path.exists():
+            if "PlagiAI-Cert-Display" not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(TTFont("PlagiAI-Cert-Display", str(path)))
+            display = "PlagiAI-Cert-Display"
+            break
+    return regular, bold, display
+
+
+def _draw_rosette(canvas, x: float, y: float, size: float) -> None:
+    """Small eight-point geometric motif inspired by traditional girih work."""
+    canvas.saveState()
+    canvas.translate(x, y)
+    canvas.setLineWidth(0.45)
+    canvas.setStrokeColor(TURQUOISE)
+    for angle in (0, 45):
+        canvas.saveState()
+        canvas.rotate(angle)
+        canvas.rect(-size / 2, -size / 2, size, size, stroke=1, fill=0)
+        canvas.restoreState()
+    canvas.setFillColor(GOLD)
+    canvas.circle(0, 0, size * 0.09, stroke=0, fill=1)
+    canvas.restoreState()
+
+
+def _decorate_certificate(canvas, _doc, page_size: tuple[float, float]) -> None:
+    width, height = page_size
+    canvas.saveState()
+    canvas.setFillColor(PAPER)
+    canvas.rect(0, 0, width, height, stroke=0, fill=1)
+
+    # Double print-style frame: restrained, formal and easy to reproduce on paper.
+    canvas.setStrokeColor(NAVY)
+    canvas.setLineWidth(0.9)
+    canvas.rect(6 * mm, 6 * mm, width - 12 * mm, height - 12 * mm, stroke=1, fill=0)
+    canvas.setStrokeColor(GOLD)
+    canvas.setLineWidth(0.35)
+    canvas.rect(8.2 * mm, 8.2 * mm, width - 16.4 * mm, height - 16.4 * mm, stroke=1, fill=0)
+
+    # A narrow ornamental frieze gives Uzbek character without turning the
+    # certificate into an illustration or a generated-looking template.
+    y_top = height - 11.8 * mm
+    y_bottom = 11.8 * mm
+    canvas.setStrokeColor(GOLD)
+    canvas.setLineWidth(0.35)
+    canvas.line(17 * mm, y_top, width - 17 * mm, y_top)
+    canvas.line(17 * mm, y_bottom, width - 17 * mm, y_bottom)
+    step = 16 * mm
+    x = 20 * mm
+    while x <= width - 20 * mm:
+        _draw_rosette(canvas, x, y_top, 3.2 * mm)
+        _draw_rosette(canvas, x, y_bottom, 3.2 * mm)
+        x += step
+
+    # Quiet corner accents based on the same geometric vocabulary.
+    _draw_rosette(canvas, 11.2 * mm, height - 11.2 * mm, 4.2 * mm)
+    _draw_rosette(canvas, width - 11.2 * mm, height - 11.2 * mm, 4.2 * mm)
+    _draw_rosette(canvas, 11.2 * mm, 11.2 * mm, 4.2 * mm)
+    _draw_rosette(canvas, width - 11.2 * mm, 11.2 * mm, 4.2 * mm)
+    canvas.restoreState()
 
 
 def _source_count(raw: str) -> int:
@@ -90,16 +154,16 @@ def _qr_drawing(value: str, size: float = 31 * mm) -> Drawing:
 
 
 def build_certificate_pdf(certificate: Certificate, verify_url: str) -> bytes:
-    regular, bold = _fonts()
+    regular, bold, display = _fonts()
     buffer = BytesIO()
     page_size = landscape(A4)
     doc = SimpleDocTemplate(
         buffer,
         pagesize=page_size,
-        leftMargin=13 * mm,
-        rightMargin=13 * mm,
-        topMargin=12 * mm,
-        bottomMargin=12 * mm,
+        leftMargin=18 * mm,
+        rightMargin=18 * mm,
+        topMargin=18 * mm,
+        bottomMargin=17 * mm,
         title=f"PlagiAI sertifikat {certificate.certificate_number}",
         author="PlagiAI",
         subject="Hujjat tekshiruvi sertifikati",
@@ -108,9 +172,9 @@ def build_certificate_pdf(certificate: Certificate, verify_url: str) -> bytes:
     title = ParagraphStyle(
         "CertTitle",
         parent=base["Title"],
-        fontName=bold,
-        fontSize=22,
-        leading=25,
+        fontName=display,
+        fontSize=21,
+        leading=24,
         textColor=NAVY,
         alignment=TA_CENTER,
         spaceAfter=2 * mm,
@@ -119,8 +183,8 @@ def build_certificate_pdf(certificate: Certificate, verify_url: str) -> bytes:
         "CertSubtitle",
         parent=base["BodyText"],
         fontName=regular,
-        fontSize=9.5,
-        leading=13,
+        fontSize=9,
+        leading=12.5,
         textColor=SLATE,
         alignment=TA_CENTER,
     )
@@ -128,7 +192,7 @@ def build_certificate_pdf(certificate: Certificate, verify_url: str) -> bytes:
         "CertHeading",
         parent=base["Heading2"],
         fontName=bold,
-        fontSize=10,
+        fontSize=8.4,
         leading=12,
         textColor=NAVY,
         alignment=TA_LEFT,
@@ -137,8 +201,8 @@ def build_certificate_pdf(certificate: Certificate, verify_url: str) -> bytes:
         "CertBody",
         parent=base["BodyText"],
         fontName=regular,
-        fontSize=8.3,
-        leading=11,
+        fontSize=8.1,
+        leading=10.6,
         textColor=SLATE,
     )
     body_bold = ParagraphStyle(
@@ -157,9 +221,9 @@ def build_certificate_pdf(certificate: Certificate, verify_url: str) -> bytes:
     metric_value = ParagraphStyle(
         "CertMetricValue",
         parent=body,
-        fontName=bold,
-        fontSize=20,
-        leading=22,
+        fontName=display,
+        fontSize=18.5,
+        leading=21,
         textColor=NAVY,
         alignment=TA_CENTER,
     )
@@ -181,20 +245,32 @@ def build_certificate_pdf(certificate: Certificate, verify_url: str) -> bytes:
     story = [
         Table(
             [[
-                Paragraph("<b>PLAGIAI</b><br/><font size='7'>ACADEMIC INTEGRITY</font>", subtitle),
-                Paragraph(f"<b>{status_text}</b>", body_bold),
-                Paragraph(f"ID: <b>{html_escape(certificate.certificate_number)}</b>", body_bold),
+                Paragraph("<b>PLAGIAI</b><br/><font size='7'>AKADEMIK HALOLLIK TIZIMI</font>", body_bold),
+                Paragraph("O‘ZBEKISTON  •  ELEKTRON HUJJAT", small),
+                Paragraph(
+                    f"HOLATI: <b>{status_text}</b><br/>"
+                    f"SERTIFIKAT № <b>{html_escape(certificate.certificate_number)}</b>",
+                    body_bold,
+                ),
             ]],
-            colWidths=[85 * mm, 45 * mm, 130 * mm],
+            colWidths=[74 * mm, 72 * mm, 115 * mm],
+            style=TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("ALIGN", (1, 0), (1, 0), "CENTER"),
+                ("ALIGN", (2, 0), (2, 0), "RIGHT"),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("LINEBELOW", (0, 0), (-1, -1), 0.7, GOLD),
+            ]),
         ),
-        Spacer(1, 5 * mm),
+        Spacer(1, 4 * mm),
         Paragraph("HUJJAT TEKSHIRUVI SERTIFIKATI", title),
         Paragraph(
-            "Ushbu sertifikat ko‘rsatilgan hujjat PlagiAI orqali tashqi manbalar bo‘yicha "
-            "tekshiruvdan o‘tkazilganini va quyidagi natija qayd etilganini tasdiqlaydi.",
+            "Mazkur sertifikat quyida ko‘rsatilgan hujjat PlagiAI tizimida tashqi manbalar "
+            "bo‘yicha tekshiruvdan o‘tkazilganini va tekshiruv natijalari elektron qayd "
+            "etilganini tasdiqlaydi.",
             subtitle,
         ),
-        Spacer(1, 5 * mm),
+        Spacer(1, 3.5 * mm),
     ]
 
     metrics = Table(
@@ -209,16 +285,17 @@ def build_certificate_pdf(certificate: Certificate, verify_url: str) -> bytes:
             Paragraph("MANBALAR", metric_label),
             Paragraph("AI EHTIMOLI", metric_label),
         ]],
-        colWidths=[60 * mm] * 4,
-        rowHeights=[14 * mm, 7 * mm],
+        colWidths=[65.25 * mm] * 4,
+        rowHeights=[13 * mm, 6.5 * mm],
     )
     metrics.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), PALE_BLUE),
-        ("BOX", (0, 0), (-1, -1), 0.8, BORDER),
-        ("INNERGRID", (0, 0), (-1, -1), 0.5, BORDER),
+        ("BACKGROUND", (0, 0), (-1, -1), PAPER),
+        ("LINEABOVE", (0, 0), (-1, 0), 0.85, NAVY),
+        ("LINEBELOW", (0, -1), (-1, -1), 0.85, NAVY),
+        ("INNERGRID", (0, 0), (-1, -1), 0.35, GOLD),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ]))
-    story.extend([metrics, Spacer(1, 5 * mm)])
+    story.extend([metrics, Spacer(1, 4 * mm)])
 
     details = Table(
         [
@@ -229,12 +306,12 @@ def build_certificate_pdf(certificate: Certificate, verify_url: str) -> bytes:
             [Paragraph("Berilgan vaqt", heading), Paragraph(issued, body)],
             [Paragraph("SHA-256", heading), Paragraph(html_escape(certificate.document_hash), small)],
         ],
-        colWidths=[48 * mm, 147 * mm],
+        colWidths=[40 * mm, 112 * mm],
     )
     details.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (0, -1), PALE_SLATE),
-        ("BOX", (0, 0), (-1, -1), 0.6, BORDER),
-        ("INNERGRID", (0, 0), (-1, -1), 0.35, BORDER),
+        ("BACKGROUND", (0, 0), (0, -1), PALE_GOLD),
+        ("BOX", (0, 0), (-1, -1), 0.55, BORDER),
+        ("INNERGRID", (0, 0), (-1, -1), 0.3, BORDER),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("LEFTPADDING", (0, 0), (-1, -1), 3 * mm),
         ("RIGHTPADDING", (0, 0), (-1, -1), 3 * mm),
@@ -244,16 +321,16 @@ def build_certificate_pdf(certificate: Certificate, verify_url: str) -> bytes:
 
     qr_block = Table(
         [[_qr_drawing(verify_url), Paragraph(
-            "<b>QR orqali tekshirish</b><br/>QR kod sertifikatning jonli verifikatsiya sahifasini ochadi. "
+            "<b>RAQAMLI TASDIQLASH</b><br/>QR kod sertifikatning jonli verifikatsiya sahifasini ochadi. "
             "Sahifadagi ID, hujjat xeshi va natijalar ushbu PDF bilan mos bo‘lishi kerak.<br/><br/>"
             f"<font size='6'>{html_escape(verify_url)}</font>",
             body,
         )]],
-        colWidths=[38 * mm, 67 * mm],
+        colWidths=[36 * mm, 72 * mm],
     )
     qr_block.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), PALE_GREEN),
-        ("BOX", (0, 0), (-1, -1), 0.8, GREEN),
+        ("BACKGROUND", (0, 0), (-1, -1), PALE_TURQUOISE),
+        ("BOX", (0, 0), (-1, -1), 0.65, TURQUOISE),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("LEFTPADDING", (0, 0), (-1, -1), 3 * mm),
         ("RIGHTPADDING", (0, 0), (-1, -1), 3 * mm),
@@ -261,19 +338,24 @@ def build_certificate_pdf(certificate: Certificate, verify_url: str) -> bytes:
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3 * mm),
     ]))
 
-    content = Table([[details, qr_block]], colWidths=[198 * mm, 108 * mm])
-    content.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
-    story.extend([content, Spacer(1, 4 * mm)])
+    content = Table([[details, qr_block]], colWidths=[153 * mm, 108 * mm])
+    content.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    story.extend([content, Spacer(1, 3.5 * mm)])
 
     disclaimer = Table([[Paragraph(
         "<b>Muhim:</b> O‘xshashlik foizi plagiat bo‘yicha yakuniy akademik hukm emas. "
         "Sertifikat faqat tekshiruv o‘tkazilganini va provayder qaytargan natijani qayd etadi. "
         "Iqtiboslar, bibliografiya, kontekst va akademik qoidalar ekspert tomonidan alohida baholanadi.",
         small,
-    )]], colWidths=[306 * mm])
+    )]], colWidths=[261 * mm])
     disclaimer.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), PALE_SLATE),
-        ("BOX", (0, 0), (-1, -1), 0.6, BORDER),
+        ("BACKGROUND", (0, 0), (-1, -1), PALE_GOLD),
+        ("LINEABOVE", (0, 0), (-1, -1), 0.55, GOLD),
+        ("LINEBELOW", (0, 0), (-1, -1), 0.55, GOLD),
         ("LEFTPADDING", (0, 0), (-1, -1), 3 * mm),
         ("RIGHTPADDING", (0, 0), (-1, -1), 3 * mm),
         ("TOPPADDING", (0, 0), (-1, -1), 2.5 * mm),
@@ -281,17 +363,7 @@ def build_certificate_pdf(certificate: Certificate, verify_url: str) -> bytes:
     ]))
     story.append(disclaimer)
 
-    def decorate(canvas, _doc) -> None:
-        width, height = page_size
-        canvas.saveState()
-        canvas.setStrokeColor(BLUE)
-        canvas.setLineWidth(1.2)
-        canvas.roundRect(7 * mm, 7 * mm, width - 14 * mm, height - 14 * mm, 4 * mm, stroke=1, fill=0)
-        canvas.setStrokeColor(CYAN)
-        canvas.setLineWidth(0.35)
-        canvas.roundRect(9.5 * mm, 9.5 * mm, width - 19 * mm, height - 19 * mm, 3 * mm, stroke=1, fill=0)
-        canvas.restoreState()
-
+    decorate = lambda canvas, built_doc: _decorate_certificate(canvas, built_doc, page_size)
     doc.build(story, onFirstPage=decorate)
     return buffer.getvalue()
 
