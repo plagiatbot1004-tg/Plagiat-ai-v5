@@ -24,20 +24,22 @@ from app.services.ai_risk import AIStyleAssessment, language_name
 from app.services.assessment import build_professional_conclusion
 from app.services.quetext import InternetScanResult
 
-NAVY = colors.HexColor("#102A43")
-GREEN = colors.HexColor("#15803D")
-AMBER = colors.HexColor("#B45309")
-SLATE = colors.HexColor("#475569")
-MUTED = colors.HexColor("#64748B")
-BORDER = colors.HexColor("#D8E1EA")
-PALE_BLUE = colors.HexColor("#EFF6FF")
-PALE_GREEN = colors.HexColor("#ECFDF3")
-PALE_RED = colors.HexColor("#FEF3F2")
-PALE_AMBER = colors.HexColor("#FFF7ED")
-PALE_SLATE = colors.HexColor("#F8FAFC")
+NAVY = colors.HexColor("#123B5D")
+TURQUOISE = colors.HexColor("#1F8E8A")
+GOLD = colors.HexColor("#B88A3B")
+GREEN = colors.HexColor("#2E6D54")
+RED = colors.HexColor("#9A4E43")
+AMBER = colors.HexColor("#9A6A27")
+SLATE = colors.HexColor("#384A55")
+MUTED = colors.HexColor("#6C7A80")
+BORDER = colors.HexColor("#D8D2C4")
+PAPER = colors.HexColor("#FFFEF8")
+PALE_TURQUOISE = colors.HexColor("#F0F8F6")
+PALE_GOLD = colors.HexColor("#FBF7EC")
+PALE_RED = colors.HexColor("#FCF4F2")
 
 
-def _fonts() -> tuple[str, str]:
+def _fonts() -> tuple[str, str, str]:
     regular_paths = (
         Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
         Path("/usr/share/fonts/dejavu/DejaVuSans.ttf"),
@@ -46,8 +48,13 @@ def _fonts() -> tuple[str, str]:
         Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
         Path("/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf"),
     )
+    display_paths = (
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"),
+        Path("/usr/share/fonts/dejavu/DejaVuSerif-Bold.ttf"),
+    )
     regular = "Helvetica"
     bold = "Helvetica-Bold"
+    display = bold
     for path in regular_paths:
         if path.exists():
             if "PlagiAI-Regular" not in pdfmetrics.getRegisteredFontNames():
@@ -60,10 +67,16 @@ def _fonts() -> tuple[str, str]:
                 pdfmetrics.registerFont(TTFont("PlagiAI-Bold", str(path)))
             bold = "PlagiAI-Bold"
             break
-    return regular, bold
+    for path in display_paths:
+        if path.exists():
+            if "PlagiAI-Display" not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(TTFont("PlagiAI-Display", str(path)))
+            display = "PlagiAI-Display"
+            break
+    return regular, bold, display
 
 
-def _styles(regular: str, bold: str) -> dict[str, ParagraphStyle]:
+def _styles(regular: str, bold: str, display: str) -> dict[str, ParagraphStyle]:
     base = getSampleStyleSheet()
     return {
         "body": ParagraphStyle(
@@ -86,9 +99,9 @@ def _styles(regular: str, bold: str) -> dict[str, ParagraphStyle]:
         "title": ParagraphStyle(
             "ReportTitle",
             parent=base["Title"],
-            fontName=bold,
-            fontSize=16.5,
-            leading=19,
+            fontName=display,
+            fontSize=16.8,
+            leading=20,
             textColor=NAVY,
             alignment=TA_LEFT,
             spaceAfter=1.2 * mm,
@@ -106,18 +119,18 @@ def _styles(regular: str, bold: str) -> dict[str, ParagraphStyle]:
             "SectionHeading",
             parent=base["Heading2"],
             fontName=bold,
-            fontSize=11.3,
+            fontSize=10.5,
             leading=13.2,
             textColor=NAVY,
             spaceBefore=1.2 * mm,
-            spaceAfter=0.7 * mm,
+            spaceAfter=1.0 * mm,
             keepWithNext=True,
         ),
         "metric_value": ParagraphStyle(
             "MetricValue",
             parent=base["BodyText"],
-            fontName=bold,
-            fontSize=14,
+            fontName=display,
+            fontSize=14.5,
             leading=16,
             textColor=NAVY,
             alignment=TA_CENTER,
@@ -184,7 +197,10 @@ def _metric_card(
         TableStyle(
             [
                 ("BACKGROUND", (0, 0), (-1, -1), background),
-                ("BOX", (0, 0), (-1, -1), 0.6, BORDER),
+                ("LINEABOVE", (0, 0), (-1, 0), 0.7, GOLD),
+                ("LINEBELOW", (0, -1), (-1, -1), 0.7, NAVY),
+                ("LINEBEFORE", (0, 0), (0, -1), 0.35, BORDER),
+                ("LINEAFTER", (-1, 0), (-1, -1), 0.35, BORDER),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("LEFTPADDING", (0, 0), (-1, -1), 2),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 2),
@@ -201,21 +217,41 @@ def _report_id(filename: str, checked_at: datetime) -> str:
     return hashlib.sha256(source).hexdigest()[:12].upper()
 
 
+def _draw_rosette(canvas, x: float, y: float, size: float) -> None:
+    canvas.saveState()
+    canvas.translate(x, y)
+    canvas.setStrokeColor(TURQUOISE)
+    canvas.setLineWidth(0.35)
+    for angle in (0, 45):
+        canvas.saveState()
+        canvas.rotate(angle)
+        canvas.rect(-size / 2, -size / 2, size, size, stroke=1, fill=0)
+        canvas.restoreState()
+    canvas.setFillColor(GOLD)
+    canvas.circle(0, 0, size * 0.09, stroke=0, fill=1)
+    canvas.restoreState()
+
+
 def _page_decorator(regular: str, bold: str, report_id: str):
     def draw(canvas, document) -> None:
         canvas.saveState()
         width, height = A4
-        canvas.setStrokeColor(BORDER)
+        canvas.setFillColor(PAPER)
+        canvas.rect(0, 0, width, height, stroke=0, fill=1)
+        canvas.setStrokeColor(GOLD)
         canvas.setLineWidth(0.5)
         canvas.line(18 * mm, height - 13 * mm, width - 18 * mm, height - 13 * mm)
+        _draw_rosette(canvas, 20.5 * mm, height - 13 * mm, 3.2 * mm)
+        _draw_rosette(canvas, width - 20.5 * mm, height - 13 * mm, 3.2 * mm)
         canvas.setFont(bold, 8)
         canvas.setFillColor(NAVY)
-        canvas.drawString(18 * mm, height - 10 * mm, "PlagiAI PROFESSIONAL")
+        canvas.drawString(18 * mm, height - 9.5 * mm, "PLAGIAI  •  AKADEMIK HALOLLIK")
         canvas.setFont(regular, 7)
         canvas.setFillColor(MUTED)
-        canvas.drawRightString(width - 18 * mm, height - 10 * mm, f"Hisobot ID: {report_id}")
+        canvas.drawRightString(width - 18 * mm, height - 9.5 * mm, f"Hisobot № {report_id}")
+        canvas.setStrokeColor(GOLD)
         canvas.line(18 * mm, 13 * mm, width - 18 * mm, 13 * mm)
-        canvas.drawString(18 * mm, 9 * mm, "Maxfiy • Akademik ekspertiza uchun")
+        canvas.drawString(18 * mm, 9 * mm, "Elektron hujjat  •  Akademik ekspertiza uchun")
         canvas.drawRightString(
             width - 18 * mm,
             9 * mm,
@@ -245,8 +281,8 @@ def build_report(
         )
 
     checked_at = checked_at or datetime.now()
-    regular, bold = _fonts()
-    styles = _styles(regular, bold)
+    regular, bold, display = _fonts()
+    styles = _styles(regular, bold, display)
     conclusion = build_professional_conclusion(internet_result, ai_assessment)
     report_id = _report_id(filename, checked_at)
     buffer = BytesIO()
@@ -265,11 +301,11 @@ def build_report(
     detected_language = ai_assessment.language if ai_assessment else "unknown"
     scan_mode = "QUETEXT REAL API - DEEPSEARCH"
     story: list[object] = [
-        Spacer(1, 0.5 * mm),
-        Paragraph("Hujjat autentikligi bo‘yicha professional hisobot", styles["title"]),
+        Spacer(1, 0.8 * mm),
+        Paragraph("TO‘LIQ TEKSHIRUV HISOBOTI", styles["title"]),
         Paragraph(
-            "Ochiq internet, akademik veb manbalar va AI indikatorlari bo‘yicha "
-            "yakuniy tashqi tahlil",
+            "Hujjatning tashqi manbalar bilan o‘xshashligi, topilgan mos fragmentlar "
+            "va AI indikatori bo‘yicha elektron qayd",
             styles["subtitle"],
         ),
     ]
@@ -299,7 +335,7 @@ def build_report(
     metadata.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (0, -1), PALE_SLATE),
+                ("BACKGROUND", (0, 0), (0, -1), PALE_GOLD),
                 ("BOX", (0, 0), (-1, -1), 0.6, BORDER),
                 ("INNERGRID", (0, 0), (-1, -1), 0.35, BORDER),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -312,7 +348,7 @@ def build_report(
     )
     story.extend([metadata, Spacer(1, 2 * mm)])
 
-    banner_background = PALE_GREEN
+    banner_background = PALE_TURQUOISE
     banner_color = GREEN
     banner = Table(
         [
@@ -332,7 +368,9 @@ def build_report(
         TableStyle(
             [
                 ("BACKGROUND", (0, 0), (-1, -1), banner_background),
-                ("BOX", (0, 0), (-1, -1), 1, banner_color),
+                ("LINEBEFORE", (0, 0), (0, -1), 2.2, banner_color),
+                ("LINEABOVE", (0, 0), (-1, 0), 0.45, BORDER),
+                ("LINEBELOW", (0, -1), (-1, -1), 0.45, BORDER),
                 ("LEFTPADDING", (0, 0), (-1, -1), 10),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 10),
                 ("TOPPADDING", (0, 0), (-1, 0), 6),
@@ -356,15 +394,15 @@ def build_report(
                     f"{internet_result.originality:.2f}%",
                     "INTERNET ORIGINALLIGI",
                     styles,
-                    PALE_GREEN,
+                    PAPER,
                 ),
                 _metric_card(
                     f"{internet_result.similarity:.2f}%",
                     "INTERNET O‘XSHASHLIGI",
                     styles,
-                    PALE_RED,
+                    PAPER,
                 ),
-                _metric_card(ai_value, "AI INDIKATORI", styles, PALE_AMBER),
+                _metric_card(ai_value, "AI INDIKATORI", styles, PAPER),
             ]
         ],
         colWidths=[58 * mm] * 3,
@@ -398,42 +436,51 @@ def build_report(
             [
                 Paragraph("№", styles["table_bold"]),
                 Paragraph("INTERNET MANBASI", styles["table_bold"]),
-                Paragraph("MOS SO‘Z", styles["table_bold"]),
+                Paragraph("MOSLIK", styles["table_bold"]),
+                Paragraph("MOS FRAGMENT", styles["table_bold"]),
             ]
         ]
-        for number, source in enumerate(internet_result.sources[:15], start=1):
+        for number, source in enumerate(internet_result.sources, start=1):
             title = escape(source.title)
             if source.url:
                 title = (
                     f"<link href={quoteattr(source.url)} color='#2563EB'>{title}</link>"
                     f"<br/><font size='6' color='#64748B'>{escape(source.url[:140])}</font>"
                 )
+            similarity_text = f"{source.matched_words} so‘z"
+            if source.similarity is not None:
+                similarity_text += f"<br/><b>{source.similarity:.2f}%</b>"
+            snippet = escape(source.introduction.strip()) if source.introduction else "-"
             source_rows.append(
                 [
                     Paragraph(str(number), styles["table"]),
                     Paragraph(title, styles["table"]),
-                    Paragraph(str(source.matched_words), styles["table_bold"]),
+                    Paragraph(similarity_text, styles["table"]),
+                    Paragraph(snippet, styles["table"]),
                 ]
             )
         source_table = LongTable(
             source_rows,
-            colWidths=[9 * mm, 145 * mm, 20 * mm],
+            colWidths=[8 * mm, 69 * mm, 23 * mm, 74 * mm],
             repeatRows=1,
         )
         source_table.setStyle(
             TableStyle(
                 [
-                    ("BACKGROUND", (0, 0), (-1, 0), PALE_BLUE),
+                    ("BACKGROUND", (0, 0), (-1, 0), PALE_TURQUOISE),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), NAVY),
                     ("BOX", (0, 0), (-1, -1), 0.5, BORDER),
                     ("INNERGRID", (0, 0), (-1, -1), 0.3, BORDER),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
                     ("LEFTPADDING", (0, 0), (-1, -1), 5),
                     ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-                    ("TOPPADDING", (0, 0), (-1, -1), 3),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
                 ]
             )
         )
+        for row in range(2, len(source_rows), 2):
+            source_table.setStyle(TableStyle([("BACKGROUND", (0, row), (-1, row), PALE_GOLD)]))
         story.append(source_table)
     else:
         story.append(
@@ -480,7 +527,7 @@ def build_report(
         ai_table.setStyle(
             TableStyle(
                 [
-                    ("BACKGROUND", (0, 0), (0, -1), PALE_AMBER),
+                    ("BACKGROUND", (0, 0), (0, -1), PALE_GOLD),
                     ("BOX", (0, 0), (-1, -1), 0.5, BORDER),
                     ("INNERGRID", (0, 0), (-1, -1), 0.3, BORDER),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
