@@ -29,6 +29,7 @@ from app.services.extractor import (
 )
 from app.services.quetext import QuetextClient, QuetextError
 from app.services.scan_manager import QuetextScanManager
+from app.services.unicode_safety import safe_text
 
 logger = logging.getLogger(__name__)
 router = Router(name="documents")
@@ -88,9 +89,9 @@ async def check_document(
         with tempfile.TemporaryDirectory(prefix="plagiai_") as temp_directory:
             local_path = Path(temp_directory) / f"upload{extension}"
             await bot.download(document, destination=local_path)
-            raw_text = await extract_text(local_path, extension)
+            raw_text = safe_text(await extract_text(local_path, extension))
 
-        normalized = normalize_text(raw_text)
+        normalized = safe_text(normalize_text(raw_text))
         word_count = len(normalized.split())
         if word_count < 20:
             await status.edit_text(
@@ -104,7 +105,9 @@ async def check_document(
             )
             return
 
-        await status.edit_text("🌐 Hujjat internet va AI tekshiruviga tayyorlanmoqda…")
+        await status.edit_text(
+            "🌐 Hujjat internet, PlagAI ichki bazasi va AI tekshiruviga tayyorlanmoqda…"
+        )
         ai_assessment, authorship_questions = await asyncio.gather(
             asyncio.to_thread(analyze_document_ai_style, raw_text),
             asyncio.to_thread(generate_authorship_questions, raw_text),
@@ -120,8 +123,8 @@ async def check_document(
                 raw_text=raw_text,
                 normalized_text=normalized,
                 word_count=word_count,
-                # Legacy columns are retained only for compatibility with the
-                # existing PostgreSQL schema. Internal similarity is disabled.
+                # These existing columns are finalized with V6 combined scores
+                # after Internet + internal comparison completes.
                 originality_score=0.0,
                 plagiarism_score=0.0,
             )
@@ -227,8 +230,8 @@ async def check_document(
             f"📝 So‘zlar: <b>{word_count}</b>\n"
             f"🌐 Til: <b>{html.escape(language_name(ai_assessment.language))}</b>\n"
             f"🧠 AI tahlili: <b>{html.escape(ai_text)}</b>\n"
-            "⚙️ Rejim: <b>Quetext real API</b>\n\n"
-            "Internet va AI natijalari yakunlangach bot bitta professional PDF "
+            "⚙️ Rejim: <b>Quetext + PlagAI Internal Database</b>\n\n"
+            "Internet, ichki baza va AI natijalari yakunlangach bot bitta professional PDF "
             "hisobotni avtomatik yuboradi. Natija webhook emas, polling orqali olinadi."
         )
     except ExtractionError as exc:
@@ -274,19 +277,10 @@ async def show_history(message: Message, session_maker: async_sessionmaker[Async
         date_text = item.created_at.strftime("%d.%m.%Y %H:%M")
         result_line = ""
         if external and external.status == "completed":
-            originality = (
-                "—"
-                if external.internet_originality is None
-                else f"{external.internet_originality:.2f}%"
-            )
-            similarity = (
-                "—"
-                if external.internet_similarity is None
-                else f"{external.internet_similarity:.2f}%"
-            )
+            originality = f"{item.originality_score:.2f}%"
+            similarity = f"{item.plagiarism_score:.2f}%"
             result_line = (
-                f"   🟢 Internet originalligi: {originality} · "
-                f"🔴 o‘xshashlik: {similarity}\n"
+                f"   🟢 Umumiy originallik: {originality} · 🔴 umumiy o‘xshashlik: {similarity}\n"
             )
         lines.append(
             f"📄 <code>{html.escape(item.filename)}</code>\n"
