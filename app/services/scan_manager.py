@@ -428,24 +428,37 @@ class QuetextScanManager:
             )
         ai_assessment = self._stored_ai_assessment(external, provider_data)
         questions = [str(value) for value in _json_list(external.authorship_questions_json)]
-        report = await asyncio.to_thread(
-            build_report,
-            submission.filename,
-            submission.word_count,
-            None,
-            internet,
-            ai_assessment,
-            questions,
-            multi_source,
-        )
-        await self.bot.send_document(
-            telegram_id,
-            BufferedInputFile(
-                report,
-                filename=f"PlagiAI_Quetext_{submission.id}.pdf",
-            ),
-            caption="📊 PlagiAI V6 ko‘p manbali yakuniy professional hisobot",
-        )
+        report_warning = ""
+        try:
+            report = await asyncio.to_thread(
+                build_report,
+                submission.filename,
+                submission.word_count,
+                None,
+                internet,
+                ai_assessment,
+                questions,
+                multi_source,
+            )
+        except Exception:
+            logger.exception(
+                "PDF report generation failed after a completed scan for submission %s",
+                submission.id,
+            )
+            report_warning = (
+                "\n\n⚠️ <b>Plagiat tekshiruvi muvaffaqiyatli yakunlandi, ammo PDF hisobotni "
+                "yaratishda texnik xatolik yuz berdi.</b> Natija Quetext xatosi sifatida "
+                "belgilanmadi."
+            )
+        else:
+            await self.bot.send_document(
+                telegram_id,
+                BufferedInputFile(
+                    report,
+                    filename=f"PlagiAI_Quetext_{submission.id}.pdf",
+                ),
+                caption="📊 PlagiAI V6 ko‘p manbali yakuniy professional hisobot",
+            )
 
         source_lines = []
         for source in internet.sources[:3]:
@@ -481,7 +494,8 @@ class QuetextScanManager:
             f"ℹ️ {html.escape(ai_assessment.verdict)}\n\n"
             f"<b>Asosiy manbalar:</b>\n{sources_text}\n\n"
             "⚠️ AI ko‘rsatkichi mualliflikni isbotlamaydi; yakuniy qaror "
-            "manbalar va mualliflik dalillari bilan birga qabul qilinadi.",
+            "manbalar va mualliflik dalillari bilan birga qabul qilinadi."
+            f"{report_warning}",
             disable_web_page_preview=True,
         )
 
