@@ -128,12 +128,19 @@ async def test_manager_completes_persists_and_notifies(tmp_path) -> None:
         assert external.internet_originality == 81.5
         assert external.ai_style_score == 64
         assert external.notified_at is not None
+        payload = json.loads(external.provider_payload_json)
+        assert payload["multi_source"]["internal_similarity"] == 0.0
+        assert payload["multi_source"]["combined_similarity"] == 18.5
+        assert payload["multi_source"]["combined_originality"] == 81.5
 
     assert client.plagiarism_ids == ["plag-1"]
     assert client.ai_ids == ["ai-1"]
     assert len(bot.documents) == 1
     assert len(bot.messages) == 1
     assert "Quetext DeepSearch" in bot.messages[0][1]
+    assert "Umumiy takrorlanmaydigan o‘xshashlik" not in bot.messages[0][1]
+    assert "Ichki baza o‘xshashligi" not in bot.messages[0][1]
+    assert "PlagAI ichki hujjat" not in bot.messages[0][1]
     await engine.dispose()
 
 
