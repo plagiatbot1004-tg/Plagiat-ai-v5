@@ -12,6 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models import ExternalScan, Submission, User
 from app.services.ai_risk import AIStyleAssessment, language_name
+from app.services.internal_similarity import (
+    InternalDocument,
+    InternalScanResult,
+    MultiSourceResult,
+    combine_similarity_results,
+    scan_internal_documents,
+)
 from app.services.quetext import (
     ExternalAIAssessment,
     InternetScanResult,
@@ -20,6 +27,7 @@ from app.services.quetext import (
     QuetextError,
 )
 from app.services.report import build_report
+from app.services.unicode_safety import safe_text, sanitize_json_value
 
 logger = logging.getLogger(__name__)
 
@@ -117,9 +125,7 @@ class QuetextScanManager:
             if not plagiarism_id:
                 raise QuetextError("Quetext plagiat hisobot ID raqami saqlanmagan.")
 
-            plagiarism_task = asyncio.create_task(
-                self.client.get_plagiarism_result(plagiarism_id)
-            )
+            plagiarism_task = asyncio.create_task(self.client.get_plagiarism_result(plagiarism_id))
             ai_task = (
                 asyncio.create_task(self.client.get_ai_result(ai_id, language=language))
                 if ai_id
@@ -174,11 +180,20 @@ class QuetextScanManager:
                     confidence="mavjud emas",
                 )
 
+            internal = await self._run_internal_scan(submission)
+            multi_source = combine_similarity_results(
+                current_text=submission.raw_text,
+                internet_similarity=float(internet.similarity or 0.0),
+                internet_sources=internet.sources,
+                internal=internal,
+            )
+
             await self._save_completed(
                 scan_id,
                 internet,
                 ai_assessment,
                 provider_data,
+                multi_source,
             )
             refreshed, refreshed_submission, refreshed_telegram_id = await self._load_scan(scan_id)
             await self._send_completed(
@@ -214,6 +229,39 @@ class QuetextScanManager:
                 )
             ).one()
             return row
+
+    async def _run_internal_scan(self, submission: Submission) -> InternalScanResult:
+        """Compare the current document with every earlier PlagAI submission."""
+        async with self.session_maker() as session:
+            rows = (
+                await session.execute(
+                    select(
+                        Submission.id,
+                        Submission.user_id,
+                        Submission.filename,
+                        Submission.raw_text,
+                    )
+                    .where(Submission.id < submission.id)
+                    .order_by(Submission.id.asc())
+                )
+            ).all()
+        candidates = [
+            InternalDocument(
+                document_id=row.id,
+                owner_user_id=row.user_id,
+                filename=safe_text(row.filename),
+                text=safe_text(row.raw_text),
+            )
+            for row in rows
+            if row.raw_text
+        ]
+        return await asyncio.to_thread(
+            scan_internal_documents,
+            current_document_id=submission.id,
+            current_user_id=submission.user_id,
+            current_text=safe_text(submission.raw_text),
+            candidates=candidates,
+        )
 
     def _stored_ai_assessment(
         self,
@@ -258,6 +306,7 @@ class QuetextScanManager:
         internet: InternetScanResult,
         ai: AIStyleAssessment,
         provider_data: dict[str, Any],
+        multi_source: MultiSourceResult,
     ) -> None:
         async with self.session_maker() as session:
             external = await session.scalar(
@@ -269,17 +318,22 @@ class QuetextScanManager:
             external.internet_similarity = internet.similarity
             external.internet_originality = internet.originality
             external.internet_sources_json = json.dumps(
-                [
-                    {
-                        "title": source.title,
-                        "url": source.url,
-                        "matched_words": source.matched_words,
-                        "introduction": source.introduction,
-                        "kind": source.kind,
-                        "similarity": source.similarity,
-                    }
-                    for source in internet.sources
-                ],
+                sanitize_json_value(
+                    [
+                        {
+                            "title": source.title,
+                            "url": source.url,
+                            "matched_words": source.matched_words,
+                            "introduction": source.introduction,
+                            "kind": source.kind,
+                            "similarity": source.similarity,
+                            "input_offset": source.input_offset,
+                            "matched_text": source.matched_text,
+                            "match_id": source.match_id,
+                        }
+                        for source in internet.sources
+                    ]
+                ),
                 ensure_ascii=False,
             )
             external.ai_style_score = ai.score
@@ -287,10 +341,16 @@ class QuetextScanManager:
             external.ai_reasons_json = json.dumps(ai.reasons, ensure_ascii=False)
             provider_data["ai_provider"] = ai.provider
             provider_data["ai_confidence"] = ai.confidence
+            provider_data["internal_scan_status"] = "completed"
+            provider_data["multi_source"] = multi_source.to_dict()
             external.provider_payload_json = json.dumps(
-                provider_data,
+                sanitize_json_value(provider_data),
                 ensure_ascii=False,
-            )[:1_000_000]
+            )
+            submission = await session.get(Submission, external.submission_id)
+            if submission is not None:
+                submission.plagiarism_score = multi_source.combined_similarity
+                submission.originality_score = multi_source.combined_originality
             external.completed_at = datetime.now(UTC)
             external.error_message = None
             await session.commit()
@@ -331,10 +391,13 @@ class QuetextScanManager:
                 introduction=str(value.get("introduction") or ""),
                 kind=str(value.get("kind") or "internet"),
                 similarity=(
-                    float(value["similarity"])
-                    if value.get("similarity") is not None
-                    else None
+                    float(value["similarity"]) if value.get("similarity") is not None else None
                 ),
+                input_offset=(
+                    int(value["input_offset"]) if value.get("input_offset") is not None else None
+                ),
+                matched_text=str(value.get("matched_text") or ""),
+                match_id=str(value.get("match_id") or ""),
             )
             for value in _json_list(external.internet_sources_json)
             if isinstance(value, dict)
@@ -345,10 +408,26 @@ class QuetextScanManager:
             sources=sources,
             status=external.status,
         )
+        raw_multi_source = provider_data.get("multi_source")
+        if isinstance(raw_multi_source, dict):
+            multi_source = MultiSourceResult.from_dict(raw_multi_source)
+        else:
+            internet_similarity = float(external.internet_similarity or 0.0)
+            multi_source = MultiSourceResult(
+                internet_similarity=internet_similarity,
+                internal_similarity=0.0,
+                combined_similarity=internet_similarity,
+                combined_originality=float(external.internet_originality or 0.0),
+                internet_matched_words=round(submission.word_count * internet_similarity / 100.0),
+                internal_matched_words=0,
+                deduplicated_matched_words=round(
+                    submission.word_count * internet_similarity / 100.0
+                ),
+                total_words=submission.word_count,
+                internal_sources=[],
+            )
         ai_assessment = self._stored_ai_assessment(external, provider_data)
-        questions = [
-            str(value) for value in _json_list(external.authorship_questions_json)
-        ]
+        questions = [str(value) for value in _json_list(external.authorship_questions_json)]
         report = await asyncio.to_thread(
             build_report,
             submission.filename,
@@ -357,6 +436,7 @@ class QuetextScanManager:
             internet,
             ai_assessment,
             questions,
+            multi_source,
         )
         await self.bot.send_document(
             telegram_id,
@@ -364,11 +444,11 @@ class QuetextScanManager:
                 report,
                 filename=f"PlagiAI_Quetext_{submission.id}.pdf",
             ),
-            caption="📊 Quetext asosidagi yakuniy professional hisobot",
+            caption="📊 PlagiAI V6 ko‘p manbali yakuniy professional hisobot",
         )
 
         source_lines = []
-        for source in internet.sources[:5]:
+        for source in internet.sources[:3]:
             title = html.escape(source.title)
             if source.url:
                 url = html.escape(source.url, quote=True)
@@ -376,6 +456,10 @@ class QuetextScanManager:
             else:
                 label = title
             source_lines.append(f"• {label} - {source.matched_words} mos so‘z")
+        for source in multi_source.internal_sources[:2]:
+            source_lines.append(
+                f"• 🗂 {html.escape(source.label)} - {source.matched_words} mos so‘z"
+            )
         sources_text = "\n".join(source_lines) or "Manba topilmadi."
         ai_score = (
             "ishonchli baho mavjud emas"
@@ -384,15 +468,18 @@ class QuetextScanManager:
         )
         await self.bot.send_message(
             telegram_id,
-            "✅ <b>Professional tekshiruv yakunlandi</b>\n\n"
+            "✅ <b>V6 ko‘p manbali tekshiruv yakunlandi</b>\n\n"
             f"📄 <code>{html.escape(submission.filename)}</code>\n"
-            f"🔎 Provayder: <b>Quetext DeepSearch</b>\n"
+            f"🔎 Rejim: <b>Quetext DeepSearch + PlagAI ichki baza</b>\n"
             f"🌐 Til: <b>{html.escape(language_name(ai_assessment.language))}</b>\n"
-            f"🟢 Internet originalligi: <b>{internet.originality:.2f}%</b>\n"
-            f"🔴 Internet o‘xshashligi: <b>{internet.similarity:.2f}%</b>\n"
+            f"🌐 Internet o‘xshashligi: <b>{multi_source.internet_similarity:.2f}%</b>\n"
+            f"🗂 Ichki baza o‘xshashligi: <b>{multi_source.internal_similarity:.2f}%</b>\n"
+            "🔴 Umumiy takrorlanmaydigan o‘xshashlik: "
+            f"<b>{multi_source.combined_similarity:.2f}%</b>\n"
+            f"🟢 Umumiy originallik: <b>{multi_source.combined_originality:.2f}%</b>\n"
             f"🧠 AIga o‘xshash matn: <b>{ai_score}</b>\n"
             f"ℹ️ {html.escape(ai_assessment.verdict)}\n\n"
-            f"<b>Asosiy internet manbalari:</b>\n{sources_text}\n\n"
+            f"<b>Asosiy manbalar:</b>\n{sources_text}\n\n"
             "⚠️ AI ko‘rsatkichi mualliflikni isbotlamaydi; yakuniy qaror "
             "manbalar va mualliflik dalillari bilan birga qabul qilinadi.",
             disable_web_page_preview=True,
