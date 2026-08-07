@@ -22,7 +22,9 @@ def test_plagiarism_report_parses_score_sources_and_snippets() -> None:
                 "matches": [
                     {
                         "input_text_match": "Mos kelgan matn",
+                        "input_text_offset": 17,
                         "input_token_count": 42,
+                        "id": "match-1",
                         "percent_similar": 85,
                         "source": {
                             "url": "https://example.uz/article",
@@ -45,6 +47,26 @@ def test_plagiarism_report_parses_score_sources_and_snippets() -> None:
     assert result.sources[0].matched_words == 42
     assert result.sources[0].introduction == "Mos kelgan matn"
     assert result.sources[0].similarity == 85
+    assert result.sources[0].input_offset == 17
+    assert result.sources[0].matched_text == "Mos kelgan matn"
+    assert result.sources[0].match_id == "match-1"
+
+
+def test_plagiarism_report_keeps_every_returned_match() -> None:
+    matches = [
+        {
+            "input_text_match": f"matching fragment number {index}",
+            "input_text_offset": index * 25,
+            "input_token_count": 8,
+            "percent_similar": 90,
+            "source": {"url": f"https://example.com/{index}"},
+        }
+        for index in range(35)
+    ]
+    result = parse_plagiarism_report({"status": True, "data": {"score": 42.0, "matches": matches}})
+
+    assert len(result.sources) == 35
+    assert result.sources[-1].input_offset is not None
 
 
 def test_ai_report_parses_sentence_level_probabilities() -> None:
@@ -70,12 +92,8 @@ def test_ai_report_parses_sentence_level_probabilities() -> None:
 
 
 def test_progress_parser_accepts_documented_and_compatible_shapes() -> None:
-    assert _progress_is_complete(
-        {"status": True, "data": [{"Progress": 1, "id": "report-1"}]}
-    )
-    assert _progress_is_complete(
-        {"status": True, "data": {"progress": 100, "status": "completed"}}
-    )
+    assert _progress_is_complete({"status": True, "data": [{"Progress": 1, "id": "report-1"}]})
+    assert _progress_is_complete({"status": True, "data": {"progress": 100, "status": "completed"}})
     assert not _progress_is_complete(
         {"status": True, "data": [{"Progress": 0.75, "id": "report-1"}]}
     )
