@@ -8,6 +8,7 @@ from app.services.quetext import (
     QuetextClient,
     QuetextError,
     _progress_is_complete,
+    _result_is_complete,
     parse_ai_report,
     parse_plagiarism_report,
 )
@@ -99,6 +100,33 @@ def test_progress_parser_accepts_documented_and_compatible_shapes() -> None:
     )
 
 
+def test_result_completion_ignores_intermediate_zero_score() -> None:
+    assert not _result_is_complete(
+        {
+            "status": True,
+            "data": {
+                "status": "in-progress",
+                "percentage": 25,
+                "score": 0,
+                "matches": [],
+            },
+        }
+    )
+    assert not _result_is_complete(
+        {
+            "status": True,
+            "data": {
+                "status": "in-progress",
+                "percentage": 40,
+                "ai_score": "0.00",
+            },
+        }
+    )
+    assert _result_is_complete(
+        {"status": True, "data": {"status": "completed", "percentage": 100, "score": 0}}
+    )
+
+
 async def test_client_uses_api_key_submits_and_polls() -> None:
     requests: list[httpx.Request] = []
 
@@ -115,7 +143,15 @@ async def test_client_uses_api_key_submits_and_polls() -> None:
         if path == "/api/v2/report/plag-1":
             return httpx.Response(
                 200,
-                json={"status": True, "data": {"score": 12.5, "matches": []}},
+                json={
+                    "status": True,
+                    "data": {
+                        "status": "completed",
+                        "percentage": 100,
+                        "score": 12.5,
+                        "matches": [],
+                    },
+                },
             )
         return httpx.Response(404, json={"status": False, "code": 404})
 
@@ -136,6 +172,127 @@ async def test_client_uses_api_key_submits_and_polls() -> None:
     submitted = json.loads(requests[0].content)
     assert submitted["title"] == "paper.docx"
     assert "sufficiently long" in submitted["text"]
+
+
+async def test_plagiarism_waits_past_intermediate_zero_until_matches_are_final(
+    monkeypatch,
+) -> None:
+    result_reads = 0
+
+    async def no_wait(_: float) -> None:
+        return None
+
+    matches = [
+        {
+            "input_text_match": f"matching fragment {index}",
+            "input_text_offset": index * 20,
+            "input_token_count": 10,
+            "percent_similar": 88,
+            "source": {"url": f"https://example.com/source-{index}"},
+        }
+        for index in range(26)
+    ]
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal result_reads
+        path = request.url.path
+        if path == "/api/v2/report/plag-processing":
+            result_reads += 1
+            if result_reads == 1:
+                return httpx.Response(
+                    200,
+                    json={
+                        "status": True,
+                        "data": {
+                            "status": "in-progress",
+                            "percentage": 25,
+                            "score": 0,
+                            "matches": [],
+                        },
+                    },
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "status": True,
+                    "data": {
+                        "status": "completed",
+                        "percentage": 100,
+                        "score": 32,
+                        "matches": matches,
+                    },
+                },
+            )
+        if path == "/api/v2/report-progress/plag-processing":
+            return httpx.Response(
+                200,
+                json={"status": True, "data": [{"Progress": 0.25}]},
+            )
+        return httpx.Response(404, json={"status": False, "code": 404})
+
+    monkeypatch.setattr("app.services.quetext.asyncio.sleep", no_wait)
+    settings = Settings(BOT_TOKEN="123456:TEST", QUETEXT_API_KEY="secret-key")
+    client = QuetextClient(settings, transport=httpx.MockTransport(handler))
+
+    result = await client.get_plagiarism_result("plag-processing")
+
+    assert result.similarity == 32
+    assert result.originality == 68
+    assert len(result.sources) == 26
+    assert result_reads == 2
+
+
+async def test_ai_waits_past_intermediate_zero_until_final_score(monkeypatch) -> None:
+    result_reads = 0
+
+    async def no_wait(_: float) -> None:
+        return None
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal result_reads
+        path = request.url.path
+        if path == "/api/v2/ai-detect-report/ai-processing":
+            result_reads += 1
+            if result_reads == 1:
+                return httpx.Response(
+                    200,
+                    json={
+                        "status": True,
+                        "data": {
+                            "status": "in-progress",
+                            "percentage": 40,
+                            "ai_score": "0.00",
+                            "ai_matches": [],
+                        },
+                    },
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "status": True,
+                    "data": {
+                        "status": "completed",
+                        "percentage": 100,
+                        "ai_score": "3.83",
+                        "ai_matches": [],
+                    },
+                },
+            )
+        if path == "/api/v2/report-progress/ai-processing":
+            return httpx.Response(
+                200,
+                json={"status": True, "data": [{"Progress": 0.4}]},
+            )
+        return httpx.Response(404, json={"status": False, "code": 404})
+
+    monkeypatch.setattr("app.services.quetext.asyncio.sleep", no_wait)
+    settings = Settings(BOT_TOKEN="123456:TEST", QUETEXT_API_KEY="secret-key")
+    client = QuetextClient(settings, transport=httpx.MockTransport(handler))
+
+    result = await client.get_ai_result("ai-processing", language="uz")
+
+    assert result.score == 3.83
+    assert result_reads == 2
 
 
 async def test_client_reads_completed_report_when_progress_is_stale(monkeypatch) -> None:
