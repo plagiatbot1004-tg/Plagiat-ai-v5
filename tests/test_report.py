@@ -19,7 +19,7 @@ def _completed_result() -> InternetScanResult:
     )
 
 
-def test_v5_pdf_contains_only_completed_quetext_results() -> None:
+def test_v6_pdf_contains_completed_multisource_sections() -> None:
     ai_assessment = AIStyleAssessment(
         score=38,
         verdict="Natija noaniq - qo‘shimcha mualliflik tekshiruvi kerak",
@@ -28,7 +28,7 @@ def test_v5_pdf_contains_only_completed_quetext_results() -> None:
         provider="PlagiAI stilometriyasi",
     )
     report = build_report(
-        "v5.docx",
+        "v6.docx",
         500,
         internet_result=_completed_result(),
         ai_assessment=ai_assessment,
@@ -38,11 +38,11 @@ def test_v5_pdf_contains_only_completed_quetext_results() -> None:
     assert report.startswith(b"%PDF")
     text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(report)).pages)
     normalized = " ".join(text.split())
-    assert "V5.1 QUETEXT" in text
+    assert "V6 MULTI-SOURCE" in text
     assert "Quetext DeepSearch" in text
-    assert "INTERNET ORIGINALLIGI" in text
-    assert "ICHKI O‘XSHASHLIK" not in text
-    assert "Ichki hujjatlar bazasi" not in text
+    assert "UMUMIY ORIGINALLIK" in text
+    assert "PLAGAI ICHKI BAZA" in text
+    assert "PlagAI ichki hujjatlar bazasi" in text
     assert "Internet tekshiruvi yakunlanmadi" not in normalized
 
 
