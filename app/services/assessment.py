@@ -27,11 +27,15 @@ def _similarity_level(value: float) -> tuple[str, str]:
 def build_professional_conclusion(
     internet: InternetScanResult,
     ai: AIStyleAssessment | None,
+    *,
+    overall_similarity: float | None = None,
+    internal_similarity: float = 0.0,
 ) -> ProfessionalConclusion:
     if internet.status != "completed" or internet.similarity is None:
         raise ValueError("Professional xulosa faqat yakunlangan tashqi skan uchun yaratiladi.")
 
-    level, interpretation = _similarity_level(internet.similarity)
+    score = internet.similarity if overall_similarity is None else overall_similarity
+    level, interpretation = _similarity_level(score)
     recommendations = [
         "Mos qismlarni asl manbalar bilan solishtiring va zarur joylarda havola kiriting."
     ]
@@ -45,11 +49,13 @@ def build_professional_conclusion(
     return ProfessionalConclusion(
         status="verified",
         status_label="TEKSHIRUV YAKUNLANDI",
-        headline=f"Internet o‘xshashlik darajasi: {level}",
+        headline=f"Umumiy o‘xshashlik darajasi: {level}",
         conclusion=(
-            f"Ochiq internet va akademik veb manbalarda {internet.similarity:.2f}% "
-            f"o‘xshashlik aniqlandi. {interpretation}"
+            f"Internet va akademik veb manbalarda {internet.similarity:.2f}%, "
+            f"PlagAI ichki hujjatlar bazasida {internal_similarity:.2f}% o‘xshashlik "
+            f"aniqlandi. Ustma-ust fragmentlar bir marta hisoblanganda umumiy "
+            f"o‘xshashlik {score:.2f}% bo‘ldi. {interpretation}"
         ),
-        evidence_level="Quetext DeepSearch tashqi skani bilan tasdiqlangan",
+        evidence_level="Quetext DeepSearch + PlagAI ichki baza dalillari",
         recommendations=recommendations[:4],
     )
