@@ -72,3 +72,28 @@ class ExternalScan(Base):
     notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     submission: Mapped[Submission] = relationship(back_populates="external_scan")
+
+
+class Certificate(Base):
+    """Publicly verifiable certificate snapshot for a completed external scan."""
+
+    __tablename__ = "certificates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    submission_id: Mapped[int] = mapped_column(
+        ForeignKey("submissions.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    certificate_number: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    verification_token: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    recipient_name: Mapped[str] = mapped_column(String(255), default="")
+    document_name: Mapped[str] = mapped_column(String(512))
+    document_hash: Mapped[str] = mapped_column(String(64), index=True)
+    word_count: Mapped[int] = mapped_column(Integer)
+    similarity_score: Mapped[float] = mapped_column(Float)
+    originality_score: Mapped[float] = mapped_column(Float)
+    source_count: Mapped[int] = mapped_column(Integer, default=0)
+    provider: Mapped[str] = mapped_column(String(100), default="Quetext DeepSearch")
+    ai_style_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
