@@ -57,3 +57,32 @@ def test_failed_or_pending_scan_cannot_generate_pdf() -> None:
         )
         with pytest.raises(ValueError, match="faqat muvaffaqiyatli"):
             build_report("xato.docx", 1200, internet_result=internet)
+
+
+def test_pdf_cleans_html_from_legacy_quetext_snippets() -> None:
+    internet = InternetScanResult(
+        similarity=32.0,
+        originality=68.0,
+        sources=[
+            InternetSource(
+                "Academic source",
+                "https://example.org/study",
+                36,
+                introduction=(
+                    "<b>In</b>&nbsp;MC, <b>Carol</b> &amp; "
+                    "<strong>Brayne</strong> studied 958 people aged over 90."
+                ),
+            )
+        ],
+        status="completed",
+    )
+
+    report = build_report("legacy.docx", 300, internet_result=internet)
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(report)).pages)
+    normalized = " ".join(text.split())
+
+    assert "In MC, Carol & Brayne studied 958 people aged over 90." in normalized
+    assert "<b>" not in text
+    assert "</b>" not in text
+    assert "&nbsp;" not in text
+    assert "&amp;" not in text
