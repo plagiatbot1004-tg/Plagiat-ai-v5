@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from sqlalchemy import select
 
 from app.database import create_engine_and_session, create_tables
@@ -133,6 +134,77 @@ async def test_manager_completes_persists_and_notifies(tmp_path) -> None:
     assert len(bot.documents) == 1
     assert len(bot.messages) == 1
     assert "Quetext DeepSearch" in bot.messages[0][1]
+    await engine.dispose()
+
+
+async def test_completed_scan_is_not_relabelled_as_quetext_failure_when_pdf_build_fails(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, session_maker = create_engine_and_session(
+        f"sqlite+aiosqlite:///{tmp_path / 'report-error.db'}"
+    )
+    await create_tables(engine)
+    async with session_maker() as session:
+        user = User(telegram_id=556677, first_name="Ali")
+        session.add(user)
+        await session.flush()
+        submission = Submission(
+            user_id=user.id,
+            telegram_file_id="telegram-file-error",
+            filename="large-paper.docx",
+            content_hash="9" * 64,
+            raw_text="This is a professional test document. " * 40,
+            normalized_text="this is a professional test document " * 40,
+            word_count=240,
+            originality_score=0,
+            plagiarism_score=0,
+        )
+        session.add(submission)
+        await session.flush()
+        session.add(
+            ExternalScan(
+                submission_id=submission.id,
+                provider="quetext",
+                scan_id="scan-report-error",
+                status="pending",
+                ai_verdict="Quetext AI tekshiruvi kutilmoqda",
+                ai_reasons_json="[]",
+                authorship_questions_json="[]",
+                provider_payload_json=json.dumps(
+                    {
+                        "detected_language": "en",
+                        "plagiarism_report_id": "plag-report-error",
+                    }
+                ),
+            )
+        )
+        await session.commit()
+
+    def fail_report(*args: object, **kwargs: object) -> bytes:
+        raise RuntimeError("synthetic PDF layout failure")
+
+    monkeypatch.setattr("app.services.scan_manager.build_report", fail_report)
+    bot = FakeBot()
+    manager = QuetextScanManager(
+        bot=bot,  # type: ignore[arg-type]
+        client=FakeQuetextClient(),  # type: ignore[arg-type]
+        session_maker=session_maker,
+    )
+    await manager._process("scan-report-error")
+
+    async with session_maker() as session:
+        external = await session.scalar(
+            select(ExternalScan).where(ExternalScan.scan_id == "scan-report-error")
+        )
+        assert external is not None
+        assert external.status == "completed"
+        assert external.notified_at is not None
+
+    assert not bot.documents
+    assert len(bot.messages) == 1
+    assert "PDF hisobotni yaratishda texnik xatolik" in bot.messages[0][1]
+    assert "Quetext tekshiruvi xato bilan tugadi" not in bot.messages[0][1]
     await engine.dispose()
 
 
