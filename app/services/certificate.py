@@ -1,5 +1,5 @@
-import json
 import base64
+import json
 import os
 import secrets
 import uuid
@@ -52,7 +52,8 @@ def _brand_logo_bytes() -> bytes | None:
     if not encoded_path.is_file():
         return None
     try:
-        return base64.b64decode(encoded_path.read_text(encoding="ascii"), validate=True)
+        encoded = encoded_path.read_text(encoding="ascii").strip()
+        return base64.b64decode(encoded, validate=True)
     except (OSError, ValueError):
         return None
 
@@ -172,7 +173,27 @@ def _source_count(raw: str) -> int:
         data = json.loads(raw or "[]")
     except (TypeError, json.JSONDecodeError):
         return 0
-    return len(data) if isinstance(data, list) else 0
+    if not isinstance(data, list):
+        return 0
+    unique: set[str] = set()
+    for index, item in enumerate(data):
+        if isinstance(item, dict):
+            key = str(item.get("url") or item.get("title") or f"source-{index}")
+        else:
+            key = f"source-{index}"
+        unique.add(key)
+    return len(unique)
+
+
+def _multi_source_snapshot(external: ExternalScan) -> dict:
+    try:
+        provider_data = json.loads(external.provider_payload_json or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    if not isinstance(provider_data, dict):
+        return {}
+    result = provider_data.get("multi_source")
+    return result if isinstance(result, dict) else {}
 
 
 def _certificate_number() -> str:
@@ -291,127 +312,180 @@ def build_certificate_pdf(certificate: Certificate, verify_url: str) -> bytes:
 
     story = [
         Table(
-            [[
-                brand_cell,
-                Paragraph("O‘ZBEKISTON  •  ELEKTRON HUJJAT", small),
-                Paragraph(
-                    f"HOLATI: <b>{status_text}</b><br/>"
-                    f"SERTIFIKAT № <b>{html_escape(certificate.certificate_number)}</b>",
-                    body_bold,
-                ),
-            ]],
+            [
+                [
+                    brand_cell,
+                    Paragraph("O‘ZBEKISTON  •  ELEKTRON HUJJAT", small),
+                    Paragraph(
+                        f"HOLATI: <b>{status_text}</b><br/>"
+                        f"SERTIFIKAT № <b>{html_escape(certificate.certificate_number)}</b>",
+                        body_bold,
+                    ),
+                ]
+            ],
             colWidths=[74 * mm, 72 * mm, 115 * mm],
-            style=TableStyle([
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("LEFTPADDING", (0, 0), (0, 0), 0),
-                ("ALIGN", (1, 0), (1, 0), "CENTER"),
-                ("ALIGN", (2, 0), (2, 0), "RIGHT"),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-                ("LINEBELOW", (0, 0), (-1, -1), 0.7, GOLD),
-            ]),
+            style=TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (0, 0), 0),
+                    ("ALIGN", (1, 0), (1, 0), "CENTER"),
+                    ("ALIGN", (2, 0), (2, 0), "RIGHT"),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                    ("LINEBELOW", (0, 0), (-1, -1), 0.7, GOLD),
+                ]
+            ),
         ),
         Spacer(1, 4 * mm),
         Paragraph("HUJJAT TEKSHIRUVI SERTIFIKATI", title),
         Paragraph(
-            "Mazkur sertifikat quyida ko‘rsatilgan hujjat PlagiAI tizimida tashqi manbalar "
-            "bo‘yicha tekshiruvdan o‘tkazilganini va tekshiruv natijalari elektron qayd "
-            "etilganini tasdiqlaydi.",
+            "Mazkur sertifikat quyida ko‘rsatilgan hujjat PlagiAI tizimida internet, "
+            "akademik va ichki hujjatlar bazasi bo‘yicha tekshiruvdan o‘tkazilganini "
+            "hamda natijalar elektron qayd etilganini tasdiqlaydi.",
             subtitle,
         ),
         Spacer(1, 3.5 * mm),
     ]
 
     metrics = Table(
-        [[
-            Paragraph(f"{certificate.originality_score:.2f}%", metric_value),
-            Paragraph(f"{certificate.similarity_score:.2f}%", metric_value),
-            Paragraph(str(certificate.source_count), metric_value),
-            Paragraph(ai_text, metric_value),
-        ], [
-            Paragraph("ORIGINALLIK", metric_label),
-            Paragraph("O‘XSHASHLIK", metric_label),
-            Paragraph("MANBALAR", metric_label),
-            Paragraph("AI EHTIMOLI", metric_label),
-        ]],
+        [
+            [
+                Paragraph(f"{certificate.originality_score:.2f}%", metric_value),
+                Paragraph(f"{certificate.similarity_score:.2f}%", metric_value),
+                Paragraph(str(certificate.source_count), metric_value),
+                Paragraph(ai_text, metric_value),
+            ],
+            [
+                Paragraph("ORIGINALLIK", metric_label),
+                Paragraph("O‘XSHASHLIK", metric_label),
+                Paragraph("MANBALAR", metric_label),
+                Paragraph("AI EHTIMOLI", metric_label),
+            ],
+        ],
         colWidths=[65.25 * mm] * 4,
         rowHeights=[13 * mm, 6.5 * mm],
     )
-    metrics.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), PAPER),
-        ("LINEABOVE", (0, 0), (-1, 0), 0.85, NAVY),
-        ("LINEBELOW", (0, -1), (-1, -1), 0.85, NAVY),
-        ("INNERGRID", (0, 0), (-1, -1), 0.35, GOLD),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-    ]))
+    metrics.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), PAPER),
+                ("LINEABOVE", (0, 0), (-1, 0), 0.85, NAVY),
+                ("LINEBELOW", (0, -1), (-1, -1), 0.85, NAVY),
+                ("INNERGRID", (0, 0), (-1, -1), 0.35, GOLD),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ]
+        )
+    )
     story.extend([metrics, Spacer(1, 4 * mm)])
 
     details = Table(
         [
-            [Paragraph("Hujjat", heading), Paragraph(html_escape(certificate.document_name), body_bold)],
+            [
+                Paragraph("Hujjat", heading),
+                Paragraph(html_escape(certificate.document_name), body_bold),
+            ],
             [Paragraph("Qabul qiluvchi", heading), Paragraph(html_escape(recipient), body)],
             [Paragraph("So‘zlar soni", heading), Paragraph(f"{certificate.word_count:,}", body)],
-            [Paragraph("Tekshiruv provayderi", heading), Paragraph(html_escape(certificate.provider), body)],
+            [
+                Paragraph("Tekshiruv provayderi", heading),
+                Paragraph(html_escape(certificate.provider), body),
+            ],
             [Paragraph("Berilgan vaqt", heading), Paragraph(issued, body)],
-            [Paragraph("SHA-256", heading), Paragraph(html_escape(certificate.document_hash), small)],
+            [
+                Paragraph("SHA-256", heading),
+                Paragraph(html_escape(certificate.document_hash), small),
+            ],
         ],
         colWidths=[40 * mm, 112 * mm],
     )
-    details.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (0, -1), PALE_GOLD),
-        ("BOX", (0, 0), (-1, -1), 0.55, BORDER),
-        ("INNERGRID", (0, 0), (-1, -1), 0.3, BORDER),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 3 * mm),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 3 * mm),
-        ("TOPPADDING", (0, 0), (-1, -1), 2 * mm),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2 * mm),
-    ]))
+    details.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (0, -1), PALE_GOLD),
+                ("BOX", (0, 0), (-1, -1), 0.55, BORDER),
+                ("INNERGRID", (0, 0), (-1, -1), 0.3, BORDER),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 3 * mm),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 3 * mm),
+                ("TOPPADDING", (0, 0), (-1, -1), 2 * mm),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2 * mm),
+            ]
+        )
+    )
 
     qr_block = Table(
-        [[_qr_drawing(verify_url), Paragraph(
-            "<b>RAQAMLI TASDIQLASH</b><br/>QR kod sertifikatning jonli verifikatsiya sahifasini ochadi. "
-            "Sahifadagi ID, hujjat xeshi va natijalar ushbu PDF bilan mos bo‘lishi kerak.<br/><br/>"
-            f"<font size='6'>{html_escape(verify_url)}</font>",
-            body,
-        )]],
+        [
+            [
+                _qr_drawing(verify_url),
+                Paragraph(
+                    "<b>RAQAMLI TASDIQLASH</b><br/>"
+                    "QR kod sertifikatning jonli verifikatsiya sahifasini ochadi. "
+                    "Sahifadagi ID, hujjat xeshi va natijalar ushbu PDF bilan mos "
+                    "bo‘lishi kerak.<br/><br/>"
+                    f"<font size='6'>{html_escape(verify_url)}</font>",
+                    body,
+                ),
+            ]
+        ],
         colWidths=[36 * mm, 72 * mm],
     )
-    qr_block.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), PALE_TURQUOISE),
-        ("BOX", (0, 0), (-1, -1), 0.65, TURQUOISE),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 3 * mm),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 3 * mm),
-        ("TOPPADDING", (0, 0), (-1, -1), 3 * mm),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3 * mm),
-    ]))
+    qr_block.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), PALE_TURQUOISE),
+                ("BOX", (0, 0), (-1, -1), 0.65, TURQUOISE),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 3 * mm),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 3 * mm),
+                ("TOPPADDING", (0, 0), (-1, -1), 3 * mm),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3 * mm),
+            ]
+        )
+    )
 
     content = Table([[details, qr_block]], colWidths=[153 * mm, 108 * mm])
-    content.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-    ]))
+    content.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
     story.extend([content, Spacer(1, 3.5 * mm)])
 
-    disclaimer = Table([[Paragraph(
-        "<b>Muhim:</b> O‘xshashlik foizi plagiat bo‘yicha yakuniy akademik hukm emas. "
-        "Sertifikat faqat tekshiruv o‘tkazilganini va provayder qaytargan natijani qayd etadi. "
-        "Iqtiboslar, bibliografiya, kontekst va akademik qoidalar ekspert tomonidan alohida baholanadi.",
-        small,
-    )]], colWidths=[261 * mm])
-    disclaimer.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), PALE_GOLD),
-        ("LINEABOVE", (0, 0), (-1, -1), 0.55, GOLD),
-        ("LINEBELOW", (0, 0), (-1, -1), 0.55, GOLD),
-        ("LEFTPADDING", (0, 0), (-1, -1), 3 * mm),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 3 * mm),
-        ("TOPPADDING", (0, 0), (-1, -1), 2.5 * mm),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5 * mm),
-    ]))
+    disclaimer = Table(
+        [
+            [
+                Paragraph(
+                    "<b>Muhim:</b> O‘xshashlik foizi plagiat bo‘yicha yakuniy akademik hukm emas. "
+                    "Sertifikat faqat tekshiruv o‘tkazilganini va provayder qaytargan "
+                    "natijani qayd etadi. Iqtiboslar, bibliografiya, kontekst va "
+                    "akademik qoidalar ekspert tomonidan alohida baholanadi.",
+                    small,
+                )
+            ]
+        ],
+        colWidths=[261 * mm],
+    )
+    disclaimer.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), PALE_GOLD),
+                ("LINEABOVE", (0, 0), (-1, -1), 0.55, GOLD),
+                ("LINEBELOW", (0, 0), (-1, -1), 0.55, GOLD),
+                ("LEFTPADDING", (0, 0), (-1, -1), 3 * mm),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 3 * mm),
+                ("TOPPADDING", (0, 0), (-1, -1), 2.5 * mm),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5 * mm),
+            ]
+        )
+    )
     story.append(disclaimer)
 
-    decorate = lambda canvas, built_doc: _decorate_certificate(canvas, built_doc, page_size)
+    def decorate(canvas, built_doc) -> None:
+        _decorate_certificate(canvas, built_doc, page_size)
+
     doc.build(story, onFirstPage=decorate)
     return buffer.getvalue()
 
@@ -440,6 +514,16 @@ async def get_or_create_certificate(
                 recipient_name = " ".join(
                     item.strip() for item in (user.first_name, user.last_name or "") if item.strip()
                 )
+            multi_source = _multi_source_snapshot(external)
+            similarity = float(
+                multi_source.get("combined_similarity", external.internet_similarity)
+            )
+            originality = float(
+                multi_source.get("combined_originality", external.internet_originality)
+            )
+            internal_sources = multi_source.get("internal_sources")
+            internal_count = len(internal_sources) if isinstance(internal_sources, list) else 0
+            internet_count = _source_count(external.internet_sources_json)
             certificate = Certificate(
                 submission_id=submission.id,
                 certificate_number=_certificate_number(),
@@ -449,10 +533,10 @@ async def get_or_create_certificate(
                 document_name=submission.filename,
                 document_hash=submission.content_hash,
                 word_count=submission.word_count,
-                similarity_score=float(external.internet_similarity),
-                originality_score=float(external.internet_originality),
-                source_count=_source_count(external.internet_sources_json),
-                provider="Quetext DeepSearch",
+                similarity_score=similarity,
+                originality_score=originality,
+                source_count=internet_count + internal_count,
+                provider="Quetext DeepSearch + PlagAI Internal",
                 ai_style_score=external.ai_style_score,
                 issued_at=datetime.now(UTC),
             )
