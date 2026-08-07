@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.config import Settings
+from app.services.unicode_safety import safe_text
 
 QUETEXT_API_BASE = "https://www.quetext.com/api/v2"
 logger = logging.getLogger(__name__)
@@ -59,6 +60,9 @@ class InternetSource:
     introduction: str = ""
     kind: str = "internet"
     similarity: float | None = None
+    input_offset: int | None = None
+    matched_text: str = ""
+    match_id: str = ""
 
 
 @dataclass(slots=True)
@@ -116,9 +120,7 @@ def _progress_is_complete(payload: dict[str, Any]) -> bool:
         if _status_is_complete(row.get("status") or row.get("Status")):
             return True
         raw_progress = (
-            row.get("Progress")
-            if row.get("Progress") is not None
-            else row.get("progress")
+            row.get("Progress") if row.get("Progress") is not None else row.get("progress")
         )
         try:
             parsed_progress = float(raw_progress)
@@ -160,7 +162,7 @@ def parse_plagiarism_report(payload: dict[str, Any]) -> InternetScanResult:
         if not isinstance(item, dict):
             continue
         source = item.get("source") or {}
-        raw_url = str(source.get("url") or "").strip()
+        raw_url = safe_text(source.get("url")).strip()
         parsed_url = urlsplit(raw_url)
         if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
             continue
@@ -169,20 +171,25 @@ def parse_plagiarism_report(payload: dict[str, Any]) -> InternetScanResult:
             matched_words = max(0, int(matched_words))
         except (TypeError, ValueError):
             matched_words = 0
-        snippet = str(
-            item.get("highlighted_snippet")
-            or item.get("input_text_match")
-            or ""
-        ).strip()
-        title = str(source.get("title") or parsed_url.netloc or raw_url).strip()
+        matched_text = safe_text(item.get("input_text_match")).strip()
+        snippet = safe_text(item.get("highlighted_snippet") or matched_text or "").strip()
+        title = safe_text(source.get("title") or parsed_url.netloc or raw_url).strip()
+        raw_offset = item.get("input_text_offset")
+        try:
+            input_offset = max(0, int(raw_offset)) if raw_offset is not None else None
+        except (TypeError, ValueError):
+            input_offset = None
         sources.append(
             InternetSource(
                 title=title[:300],
                 url=raw_url,
                 matched_words=matched_words,
-                introduction=snippet[:700],
+                introduction=snippet,
                 kind="internet",
                 similarity=_number(item.get("percent_similar")),
+                input_offset=input_offset,
+                matched_text=matched_text,
+                match_id=safe_text(item.get("id"))[:128],
             )
         )
     sources.sort(
@@ -192,7 +199,7 @@ def parse_plagiarism_report(payload: dict[str, Any]) -> InternetScanResult:
     return InternetScanResult(
         similarity=similarity,
         originality=originality,
-        sources=sources[:20],
+        sources=sources,
         status="completed",
     )
 
@@ -212,7 +219,7 @@ def parse_ai_report(
         if not isinstance(item, dict):
             continue
         probability = _number(item.get("generated_prob"), percentage=True)
-        sentence = str(item.get("sentence") or "").strip()
+        sentence = safe_text(item.get("sentence")).strip()
         if probability is not None and sentence:
             matches.append((probability, sentence))
     matches.sort(reverse=True, key=lambda item: item[0])
@@ -296,10 +303,11 @@ class QuetextClient:
             if not isinstance(payload, dict):
                 payload = {}
 
-            if response.status_code == 429 or response.status_code >= 500:
-                if attempt + 1 < attempts:
-                    await asyncio.sleep(1.5 * (2**attempt))
-                    continue
+            if (
+                response.status_code == 429 or response.status_code >= 500
+            ) and attempt + 1 < attempts:
+                await asyncio.sleep(1.5 * (2**attempt))
+                continue
             if response.is_error or payload.get("status") is False:
                 code = payload.get("code", response.status_code)
                 data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
@@ -388,9 +396,7 @@ class QuetextClient:
         else:
             if _result_is_complete(result_payload, score_field=score_field):
                 return result_payload
-        raise QuetextTimeoutError(
-            "Quetext tekshiruvi belgilangan vaqt ichida yakunlanmadi."
-        )
+        raise QuetextTimeoutError("Quetext tekshiruvi belgilangan vaqt ichida yakunlanmadi.")
 
     async def get_plagiarism_result(self, report_id: str) -> InternetScanResult:
         payload = await self._wait_for_result(
