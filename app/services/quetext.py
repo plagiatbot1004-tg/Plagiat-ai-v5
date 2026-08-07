@@ -133,7 +133,7 @@ def _progress_is_complete(payload: dict[str, Any]) -> bool:
     return False
 
 
-def _result_is_complete(payload: dict[str, Any], *, score_field: str) -> bool:
+def _result_is_complete(payload: dict[str, Any]) -> bool:
     data = payload.get("data")
     if not isinstance(data, dict):
         return False
@@ -143,11 +143,9 @@ def _result_is_complete(payload: dict[str, Any], *, score_field: str) -> bool:
         percentage = float(data.get("percentage"))
     except (TypeError, ValueError):
         percentage = 0.0
-    if percentage >= 100:
-        return True
-    # Quetext documents the final score as null while processing. This fallback
-    # handles completed reports whose status/progress fields are omitted.
-    return score_field in data and data.get(score_field) is not None
+    # A score can be present before DeepSearch has finished collecting matches.
+    # Quetext documents status/percentage (not score) as the completion signal.
+    return percentage >= 100
 
 
 def parse_plagiarism_report(payload: dict[str, Any]) -> InternetScanResult:
@@ -348,7 +346,6 @@ class QuetextClient:
         report_id: str,
         *,
         result_path: str,
-        score_field: str,
     ) -> dict[str, Any]:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self.settings.quetext_timeout_seconds
@@ -367,7 +364,7 @@ class QuetextClient:
                 if exc.status_code not in {404, 409, 429, 500, 502, 503, 504}:
                     raise
             else:
-                if _result_is_complete(result_payload, score_field=score_field):
+                if _result_is_complete(result_payload):
                     return result_payload
 
             try:
@@ -394,7 +391,7 @@ class QuetextClient:
             if exc.status_code not in {404, 409, 429, 500, 502, 503, 504}:
                 raise
         else:
-            if _result_is_complete(result_payload, score_field=score_field):
+            if _result_is_complete(result_payload):
                 return result_payload
         raise QuetextTimeoutError("Quetext tekshiruvi belgilangan vaqt ichida yakunlanmadi.")
 
@@ -402,7 +399,6 @@ class QuetextClient:
         payload = await self._wait_for_result(
             report_id,
             result_path=f"/report/{report_id}",
-            score_field="score",
         )
         return parse_plagiarism_report(payload)
 
@@ -415,6 +411,5 @@ class QuetextClient:
         payload = await self._wait_for_result(
             report_id,
             result_path=f"/ai-detect-report/{report_id}",
-            score_field="ai_score",
         )
         return parse_ai_report(payload, language=language)
