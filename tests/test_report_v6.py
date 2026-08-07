@@ -12,7 +12,7 @@ from app.services.quetext import InternetScanResult, InternetSource
 from app.services.report import build_report
 
 
-def test_v6_report_contains_multi_source_scores_and_internal_evidence() -> None:
+def test_v6_report_hides_internal_database_evidence() -> None:
     internet = InternetScanResult(
         similarity=18.0,
         originality=82.0,
@@ -82,8 +82,8 @@ def test_v6_report_contains_multi_source_scores_and_internal_evidence() -> None:
     assert "V6 MULTI-SOURCE" in text
     assert "UMUMIY O‘XSHASHLIK" in text
     assert "30.00%" in text
-    assert "PlagAI ichki hujjat #7" in text
-    assert "Ichki hujjatdan topilgan" in text
+    assert "PlagAI ichki hujjat #7" not in text
+    assert "Ichki hujjatdan topilgan" not in text
 
 
 def test_v6_report_paginates_very_long_evidence_without_losing_the_tail() -> None:
@@ -147,6 +147,6 @@ def test_v6_report_paginates_very_long_evidence_without_losing_the_tail() -> Non
     assert len(reader.pages) > 2
     assert "INTERNET_BOSHI" in text
     assert "INTERNET_OXIRI" in text
-    assert "ICHKI_BOSHI" in text
-    assert "ICHKI_OXIRI" in text
+    assert "ICHKI_BOSHI" not in text
+    assert "ICHKI_OXIRI" not in text
     assert "davomi" in text
