@@ -70,6 +70,32 @@ def test_plagiarism_report_keeps_every_returned_match() -> None:
     assert result.sources[-1].input_offset is not None
 
 
+def test_plagiarism_report_removes_highlight_html_and_decodes_entities() -> None:
+    result = parse_plagiarism_report(
+        {
+            "status": True,
+            "data": {
+                "score": 32,
+                "matches": [
+                    {
+                        "input_text_match": "In MC, Carol & Brayne studied ageing.",
+                        "input_token_count": 7,
+                        "highlighted_snippet": (
+                            "<b>In</b>&nbsp;MC, <strong>Carol</strong> &amp; "
+                            "<i>Brayne</i> studied ageing."
+                        ),
+                        "source": {"url": "https://example.com/study"},
+                    }
+                ],
+            },
+        }
+    )
+
+    assert result.sources[0].introduction == "In MC, Carol & Brayne studied ageing."
+    assert "<b>" not in result.sources[0].introduction
+    assert "&nbsp;" not in result.sources[0].introduction
+
+
 def test_ai_report_parses_sentence_level_probabilities() -> None:
     result = parse_ai_report(
         {
