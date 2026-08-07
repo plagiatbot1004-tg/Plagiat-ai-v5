@@ -23,6 +23,8 @@ class Settings(BaseSettings):
         ge=30,
         le=3600,
     )
+    public_base_url: str | None = Field(default=None, alias="PUBLIC_BASE_URL")
+    railway_public_domain: str | None = Field(default=None, alias="RAILWAY_PUBLIC_DOMAIN")
     port: int = Field(default=8080, alias="PORT", ge=1, le=65535)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -36,6 +38,14 @@ class Settings(BaseSettings):
         if value.startswith("postgresql://"):
             return value.replace("postgresql://", "postgresql+asyncpg://", 1)
         return value
+
+    @field_validator("public_base_url")
+    @classmethod
+    def normalize_public_base_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip().rstrip("/")
+        return cleaned or None
 
     @property
     def admin_id_set(self) -> set[int]:
@@ -53,6 +63,17 @@ class Settings(BaseSettings):
     @property
     def quetext_ready(self) -> bool:
         return bool(self.quetext_api_key and self.quetext_api_key.strip())
+
+    @property
+    def verification_base_url(self) -> str:
+        if self.public_base_url:
+            return self.public_base_url
+        if self.railway_public_domain:
+            domain = self.railway_public_domain.strip().rstrip("/")
+            if domain.startswith(("http://", "https://")):
+                return domain
+            return f"https://{domain}"
+        return f"http://localhost:{self.port}"
 
 
 @lru_cache

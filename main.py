@@ -10,8 +10,8 @@ from aiogram.enums import ParseMode
 from app.config import get_settings
 from app.database import create_engine_and_session, create_tables
 from app.handlers import build_router
+from app.services.certified_scan_manager import CertifiedQuetextScanManager
 from app.services.quetext import QuetextClient
-from app.services.scan_manager import QuetextScanManager
 from app.web import create_web_app
 
 
@@ -27,12 +27,13 @@ async def main() -> None:
     dispatcher = Dispatcher()
     dispatcher.include_router(build_router())
     quetext_client = QuetextClient(settings)
-    scan_manager = QuetextScanManager(
+    scan_manager = CertifiedQuetextScanManager(
         bot=bot,
         client=quetext_client,
         session_maker=session_maker,
+        settings=settings,
     )
-    web_app = create_web_app()
+    web_app = create_web_app(settings=settings, session_maker=session_maker)
     web_server = uvicorn.Server(
         uvicorn.Config(
             web_app,
