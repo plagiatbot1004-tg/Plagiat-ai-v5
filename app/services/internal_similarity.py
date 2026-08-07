@@ -205,11 +205,18 @@ class MultiSourceResult:
         sources = value.get("internal_sources")
         if not isinstance(sources, list):
             sources = []
+        combined_similarity = min(
+            100.0,
+            max(0.0, float(value.get("combined_similarity") or 0.0)),
+        )
         return cls(
             internet_similarity=float(value.get("internet_similarity") or 0.0),
             internal_similarity=float(value.get("internal_similarity") or 0.0),
-            combined_similarity=float(value.get("combined_similarity") or 0.0),
-            combined_originality=float(value.get("combined_originality") or 100.0),
+            combined_similarity=combined_similarity,
+            # Originality is derived from similarity so 0.0 is never mistaken
+            # for a missing value and stale/inconsistent persisted values heal
+            # automatically when an older scan is loaded.
+            combined_originality=round(100.0 - combined_similarity, 2),
             internet_matched_words=int(value.get("internet_matched_words") or 0),
             internal_matched_words=int(value.get("internal_matched_words") or 0),
             deduplicated_matched_words=int(value.get("deduplicated_matched_words") or 0),
