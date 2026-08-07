@@ -134,3 +134,57 @@ async def test_manager_completes_persists_and_notifies(tmp_path) -> None:
     assert len(bot.messages) == 1
     assert "Quetext DeepSearch" in bot.messages[0][1]
     await engine.dispose()
+
+
+async def test_manager_compares_against_prior_database_submissions(tmp_path) -> None:
+    engine, session_maker = create_engine_and_session(
+        f"sqlite+aiosqlite:///{tmp_path / 'internal.db'}"
+    )
+    await create_tables(engine)
+    copied = (
+        "ilmiy tadqiqot jarayonida manbalarni to'g'ri ko'rsatish va akademik "
+        "halollik qoidalariga rioya qilish muhim hisoblanadi"
+    )
+    async with session_maker() as session:
+        first_user = User(telegram_id=1001, first_name="Source")
+        current_user = User(telegram_id=1002, first_name="Current")
+        session.add_all([first_user, current_user])
+        await session.flush()
+        source = Submission(
+            user_id=first_user.id,
+            telegram_file_id="source-file",
+            filename="private-source.docx",
+            content_hash="1" * 64,
+            raw_text=f"Oldingi hujjat. {copied}. Yakun.",
+            normalized_text=copied,
+            word_count=20,
+            originality_score=0,
+            plagiarism_score=0,
+        )
+        session.add(source)
+        await session.flush()
+        current = Submission(
+            user_id=current_user.id,
+            telegram_file_id="current-file",
+            filename="current.docx",
+            content_hash="2" * 64,
+            raw_text=f"Yangi kirish. {copied}. Yangi xulosa.",
+            normalized_text=copied,
+            word_count=20,
+            originality_score=0,
+            plagiarism_score=0,
+        )
+        session.add(current)
+        await session.commit()
+
+    manager = QuetextScanManager(
+        bot=FakeBot(),  # type: ignore[arg-type]
+        client=FakeQuetextClient(),  # type: ignore[arg-type]
+        session_maker=session_maker,
+    )
+    result = await manager._run_internal_scan(current)
+
+    assert result.similarity > 60
+    assert result.sources[0].document_id == source.id
+    assert result.sources[0].label == f"PlagAI ichki hujjat #{source.id}"
+    await engine.dispose()
