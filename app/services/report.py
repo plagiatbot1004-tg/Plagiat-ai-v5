@@ -42,6 +42,7 @@ PAPER = colors.HexColor("#FFFEF8")
 PALE_TURQUOISE = colors.HexColor("#F0F8F6")
 PALE_GOLD = colors.HexColor("#FBF7EC")
 PALE_RED = colors.HexColor("#FCF4F2")
+MAX_TABLE_FRAGMENT_CHARS = 900
 
 
 @lru_cache(maxsize=1)
@@ -240,6 +241,26 @@ def _metric_card(
 def _report_id(filename: str, checked_at: datetime) -> str:
     source = f"{filename}|{checked_at.isoformat()}".encode()
     return hashlib.sha256(source).hexdigest()[:12].upper()
+
+
+def _split_table_fragment(text: str, limit: int = MAX_TABLE_FRAGMENT_CHARS) -> list[str]:
+    """Split evidence into rows that ReportLab can paginate without losing content."""
+    value = text.strip()
+    if not value:
+        return ["-"]
+
+    chunks: list[str] = []
+    while len(value) > limit:
+        split_at = value.rfind(" ", 0, limit + 1)
+        if split_at < limit // 2:
+            split_at = limit
+        chunks.append(value[:split_at])
+        value = value[split_at:]
+        if value.startswith(" "):
+            value = value[1:]
+    if value:
+        chunks.append(value)
+    return chunks
 
 
 def _draw_step_motif(canvas, x: float, y: float, size: float) -> None:
@@ -540,15 +561,22 @@ def build_report(
             similarity_text = f"{source.matched_words} so‘z"
             if source.similarity is not None:
                 similarity_text += f"<br/><b>{source.similarity:.2f}%</b>"
-            snippet = escape(source.introduction.strip()) if source.introduction else "-"
-            source_rows.append(
-                [
-                    Paragraph(str(number), styles["table"]),
-                    Paragraph(title, styles["table"]),
-                    Paragraph(similarity_text, styles["table"]),
-                    Paragraph(snippet, styles["table"]),
-                ]
-            )
+            snippet_chunks = _split_table_fragment(source.introduction or "")
+            for chunk_number, snippet in enumerate(snippet_chunks, start=1):
+                first_chunk = chunk_number == 1
+                source_cell = (
+                    title
+                    if first_chunk
+                    else f"(davomi {chunk_number}/{len(snippet_chunks)})"
+                )
+                source_rows.append(
+                    [
+                        Paragraph(str(number) if first_chunk else "", styles["table"]),
+                        Paragraph(source_cell, styles["table"]),
+                        Paragraph(similarity_text if first_chunk else "", styles["table"]),
+                        Paragraph(escape(snippet), styles["table"]),
+                    ]
+                )
         source_table = LongTable(
             source_rows,
             colWidths=[8 * mm, 69 * mm, 23 * mm, 74 * mm],
@@ -593,17 +621,30 @@ def build_report(
         row_number = 1
         for source in multi_source_result.internal_sources:
             for match in source.matches:
-                internal_rows.append(
-                    [
-                        Paragraph(str(row_number), styles["table"]),
-                        Paragraph(escape(source.label), styles["table_bold"]),
-                        Paragraph(
-                            f"{match.matched_words} so‘z<br/><b>{source.similarity:.2f}%</b>",
-                            styles["table"],
-                        ),
-                        Paragraph(escape(match.text) or "-", styles["table"]),
-                    ]
-                )
+                match_chunks = _split_table_fragment(match.text)
+                for chunk_number, snippet in enumerate(match_chunks, start=1):
+                    first_chunk = chunk_number == 1
+                    source_label = (
+                        escape(source.label)
+                        if first_chunk
+                        else f"(davomi {chunk_number}/{len(match_chunks)})"
+                    )
+                    internal_rows.append(
+                        [
+                            Paragraph(str(row_number) if first_chunk else "", styles["table"]),
+                            Paragraph(source_label, styles["table_bold"]),
+                            Paragraph(
+                                (
+                                    f"{match.matched_words} so‘z<br/>"
+                                    f"<b>{source.similarity:.2f}%</b>"
+                                    if first_chunk
+                                    else ""
+                                ),
+                                styles["table"],
+                            ),
+                            Paragraph(escape(snippet), styles["table"]),
+                        ]
+                    )
                 row_number += 1
         internal_table = LongTable(
             internal_rows,
