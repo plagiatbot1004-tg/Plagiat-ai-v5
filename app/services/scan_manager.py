@@ -180,7 +180,16 @@ class QuetextScanManager:
                     confidence="mavjud emas",
                 )
 
-            internal = await self._run_internal_scan(submission)
+            # Internal-document comparison is intentionally disabled in the
+            # production result path. Keep the engine available for a future
+            # opt-in mode, but make Quetext the sole similarity source shown
+            # to users and used for the final score.
+            internal = InternalScanResult(
+                similarity=0.0,
+                matched_words=0,
+                total_words=submission.word_count,
+                sources=[],
+            )
             multi_source = combine_similarity_results(
                 current_text=submission.raw_text,
                 internet_similarity=float(internet.similarity or 0.0),
@@ -469,10 +478,6 @@ class QuetextScanManager:
             else:
                 label = title
             source_lines.append(f"• {label} - {source.matched_words} mos so‘z")
-        for source in multi_source.internal_sources[:2]:
-            source_lines.append(
-                f"• 🗂 {html.escape(source.label)} - {source.matched_words} mos so‘z"
-            )
         sources_text = "\n".join(source_lines) or "Manba topilmadi."
         ai_score = (
             "ishonchli baho mavjud emas"
@@ -483,12 +488,9 @@ class QuetextScanManager:
             telegram_id,
             "✅ <b>V6 ko‘p manbali tekshiruv yakunlandi</b>\n\n"
             f"📄 <code>{html.escape(submission.filename)}</code>\n"
-            f"🔎 Rejim: <b>Quetext DeepSearch + PlagAI ichki baza</b>\n"
+            f"🔎 Rejim: <b>Quetext DeepSearch</b>\n"
             f"🌐 Til: <b>{html.escape(language_name(ai_assessment.language))}</b>\n"
             f"🌐 Internet o‘xshashligi: <b>{multi_source.internet_similarity:.2f}%</b>\n"
-            f"🗂 Ichki baza o‘xshashligi: <b>{multi_source.internal_similarity:.2f}%</b>\n"
-            "🔴 Umumiy takrorlanmaydigan o‘xshashlik: "
-            f"<b>{multi_source.combined_similarity:.2f}%</b>\n"
             f"🟢 Umumiy originallik: <b>{multi_source.combined_originality:.2f}%</b>\n"
             f"🧠 AIga o‘xshash matn: <b>{ai_score}</b>\n"
             f"ℹ️ {html.escape(ai_assessment.verdict)}\n\n"
