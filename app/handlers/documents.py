@@ -106,7 +106,7 @@ async def check_document(
             return
 
         await status.edit_text(
-            "🌐 Hujjat internet, PlagAI ichki bazasi va AI tekshiruviga tayyorlanmoqda…"
+            "🌐 Hujjat internet va AI tekshiruviga tayyorlanmoqda…"
         )
         ai_assessment, authorship_questions = await asyncio.gather(
             asyncio.to_thread(analyze_document_ai_style, raw_text),
@@ -230,8 +230,8 @@ async def check_document(
             f"📝 So‘zlar: <b>{word_count}</b>\n"
             f"🌐 Til: <b>{html.escape(language_name(ai_assessment.language))}</b>\n"
             f"🧠 AI tahlili: <b>{html.escape(ai_text)}</b>\n"
-            "⚙️ Rejim: <b>Quetext + PlagAI Internal Database</b>\n\n"
-            "Internet, ichki baza va AI natijalari yakunlangach bot bitta professional PDF "
+            "⚙️ Rejim: <b>Quetext DeepSearch</b>\n\n"
+            "Internet va AI natijalari yakunlangach bot bitta professional PDF "
             "hisobotni avtomatik yuboradi. Natija webhook emas, polling orqali olinadi."
         )
     except ExtractionError as exc:
