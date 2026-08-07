@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.config import Settings
-from app.services.unicode_safety import safe_text
+from app.services.unicode_safety import html_fragment_to_text, safe_text
 
 QUETEXT_API_BASE = "https://www.quetext.com/api/v2"
 logger = logging.getLogger(__name__)
@@ -170,7 +170,12 @@ def parse_plagiarism_report(payload: dict[str, Any]) -> InternetScanResult:
         except (TypeError, ValueError):
             matched_words = 0
         matched_text = safe_text(item.get("input_text_match")).strip()
-        snippet = safe_text(item.get("highlighted_snippet") or matched_text or "").strip()
+        highlighted_snippet = item.get("highlighted_snippet")
+        snippet = (
+            html_fragment_to_text(highlighted_snippet)
+            if highlighted_snippet
+            else matched_text
+        )
         title = safe_text(source.get("title") or parsed_url.netloc or raw_url).strip()
         raw_offset = item.get("input_text_offset")
         try:
