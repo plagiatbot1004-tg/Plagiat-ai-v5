@@ -371,7 +371,6 @@ def build_report(
         internet_result,
         ai_assessment,
         overall_similarity=multi_source_result.combined_similarity,
-        internal_similarity=multi_source_result.internal_similarity,
     )
     report_id = _report_id(filename, checked_at)
     buffer = BytesIO()
@@ -384,17 +383,17 @@ def build_report(
         bottomMargin=16 * mm,
         title=f"PlagiAI professional hisoboti — {filename}",
         author="PlagiAI Professional",
-        subject="Internet, akademik va PlagAI ichki bazasi bo‘yicha o‘xshashlik hisoboti",
+        subject="Internet va akademik manbalar bo‘yicha o‘xshashlik hisoboti",
     )
 
     detected_language = ai_assessment.language if ai_assessment else "unknown"
-    scan_mode = "QUETEXT DEEPSEARCH + PLAGAI INTERNAL DATABASE"
+    scan_mode = "QUETEXT DEEPSEARCH"
     story: list[object] = [
         Spacer(1, 0.8 * mm),
         Paragraph("TO‘LIQ TEKSHIRUV HISOBOTI", styles["title"]),
         Paragraph(
-            "Internet, akademik manbalar va PlagAI ichki hujjatlar bazasi bilan "
-            "o‘xshashlik, mos fragmentlar va AI indikatori bo‘yicha elektron qayd",
+            "Internet va akademik manbalar bo‘yicha o‘xshashlik, mos fragmentlar "
+            "va AI indikatori bo‘yicha elektron qayd",
             styles["subtitle"],
         ),
     ]
@@ -476,7 +475,7 @@ def build_report(
         if not ai_assessment or ai_assessment.score is None
         else f"{ai_assessment.score:.1f}%"
     )
-    card_width = 41.5 * mm
+    card_width = 56 * mm
     metrics = Table(
         [
             [
@@ -501,16 +500,9 @@ def build_report(
                     PAPER,
                     card_width,
                 ),
-                _metric_card(
-                    f"{multi_source_result.internal_similarity:.2f}%",
-                    "PLAGAI ICHKI BAZA",
-                    styles,
-                    PAPER,
-                    card_width,
-                ),
             ]
         ],
-        colWidths=[43.5 * mm] * 4,
+        colWidths=[58 * mm] * 3,
     )
     metrics.setStyle(
         TableStyle(
@@ -527,9 +519,7 @@ def build_report(
         [
             metrics,
             Paragraph(
-                f"AI indikatori: <b>{escape(ai_value)}</b>  •  "
-                f"Takrorlanmaydigan mos so‘zlar: "
-                f"<b>{multi_source_result.deduplicated_matched_words:,}</b>",
+                f"AI indikatori: <b>{escape(ai_value)}</b>",
                 styles["small"],
             ),
             Paragraph("1. Internet manbalari bo‘yicha natija", styles["heading"]),
@@ -608,74 +598,7 @@ def build_report(
             )
         )
 
-    story.append(Paragraph("2. PlagAI ichki hujjatlar bazasi", styles["heading"]))
-    if multi_source_result.internal_sources:
-        internal_rows: list[list[object]] = [
-            [
-                Paragraph("№", styles["table_bold"]),
-                Paragraph("ICHKI MANBA", styles["table_bold"]),
-                Paragraph("MOSLIK", styles["table_bold"]),
-                Paragraph("MOS FRAGMENT", styles["table_bold"]),
-            ]
-        ]
-        row_number = 1
-        for source in multi_source_result.internal_sources:
-            for match in source.matches:
-                match_chunks = _split_table_fragment(match.text)
-                for chunk_number, snippet in enumerate(match_chunks, start=1):
-                    first_chunk = chunk_number == 1
-                    source_label = (
-                        escape(source.label)
-                        if first_chunk
-                        else f"(davomi {chunk_number}/{len(match_chunks)})"
-                    )
-                    internal_rows.append(
-                        [
-                            Paragraph(str(row_number) if first_chunk else "", styles["table"]),
-                            Paragraph(source_label, styles["table_bold"]),
-                            Paragraph(
-                                (
-                                    f"{match.matched_words} so‘z<br/>"
-                                    f"<b>{source.similarity:.2f}%</b>"
-                                    if first_chunk
-                                    else ""
-                                ),
-                                styles["table"],
-                            ),
-                            Paragraph(escape(snippet), styles["table"]),
-                        ]
-                    )
-                row_number += 1
-        internal_table = LongTable(
-            internal_rows,
-            colWidths=[8 * mm, 54 * mm, 25 * mm, 87 * mm],
-            repeatRows=1,
-        )
-        internal_table.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), PALE_GOLD),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), NAVY),
-                    ("BOX", (0, 0), (-1, -1), 0.5, BORDER),
-                    ("INNERGRID", (0, 0), (-1, -1), 0.3, BORDER),
-                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 5),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-                    ("TOPPADDING", (0, 0), (-1, -1), 4),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-                ]
-            )
-        )
-        story.append(internal_table)
-    else:
-        story.append(
-            Paragraph(
-                "Oldingi PlagAI hujjatlarida kamida 8 so‘zli ishonchli mos fragment topilmadi.",
-                styles["body"],
-            )
-        )
-
-    story.append(Paragraph("3. AI yordamida yozilgan matn indikatori", styles["heading"]))
+    story.append(Paragraph("2. AI yordamida yozilgan matn indikatori", styles["heading"]))
     if ai_assessment is None:
         story.append(
             Paragraph(
@@ -728,12 +651,12 @@ def build_report(
             story.append(Paragraph(f"• {escape(reason)}", styles["body"]))
         story.append(Paragraph(f"<i>{escape(ai_assessment.disclaimer)}</i>", styles["small"]))
 
-    story.append(Paragraph("4. Ekspert tavsiyalari", styles["heading"]))
+    story.append(Paragraph("3. Ekspert tavsiyalari", styles["heading"]))
     for number, recommendation in enumerate(conclusion.recommendations, start=1):
         story.append(Paragraph(f"<b>{number}.</b> {escape(recommendation)}", styles["body"]))
 
     if authorship_questions:
-        story.append(Paragraph("5. Mualliflikni tekshirish savollari", styles["heading"]))
+        story.append(Paragraph("4. Mualliflikni tekshirish savollari", styles["heading"]))
         question_lines = "<br/>".join(
             f"<b>{number}.</b> {escape(question)}"
             for number, question in enumerate(authorship_questions[:3], start=1)
