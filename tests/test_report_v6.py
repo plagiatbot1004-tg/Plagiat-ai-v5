@@ -84,3 +84,69 @@ def test_v6_report_contains_multi_source_scores_and_internal_evidence() -> None:
     assert "30.00%" in text
     assert "PlagAI ichki hujjat #7" in text
     assert "Ichki hujjatdan topilgan" in text
+
+
+def test_v6_report_paginates_very_long_evidence_without_losing_the_tail() -> None:
+    long_internet_fragment = (
+        "INTERNET_BOSHI " + ("uzun internet fragmenti " * 1800) + "INTERNET_OXIRI"
+    )
+    long_internal_fragment = "ICHKI_BOSHI " + ("uzun ichki fragment " * 1800) + "ICHKI_OXIRI"
+    internet = InternetScanResult(
+        similarity=55.0,
+        originality=45.0,
+        sources=[
+            InternetSource(
+                title="Long source",
+                url="https://example.org/long",
+                matched_words=3600,
+                introduction=long_internet_fragment,
+            )
+        ],
+        status="completed",
+    )
+    internal_match = InternalMatch(
+        source_document_id=9,
+        source_label="PlagAI ichki hujjat #9",
+        input_start=0,
+        input_end=len(long_internal_fragment),
+        input_word_start=0,
+        input_word_end=3600,
+        source_start=0,
+        source_end=len(long_internal_fragment),
+        matched_words=3600,
+        text=long_internal_fragment,
+    )
+    internal_source = InternalSource(
+        document_id=9,
+        label="PlagAI ichki hujjat #9",
+        matched_words=3600,
+        similarity=55.0,
+        matches=[internal_match],
+    )
+    multi = MultiSourceResult(
+        internet_similarity=55.0,
+        internal_similarity=55.0,
+        combined_similarity=55.0,
+        combined_originality=45.0,
+        internet_matched_words=3600,
+        internal_matched_words=3600,
+        deduplicated_matched_words=3600,
+        total_words=6500,
+        internal_sources=[internal_source],
+    )
+
+    pdf = build_report(
+        "very-long.docx",
+        6500,
+        internet_result=internet,
+        multi_source_result=multi,
+    )
+    reader = PdfReader(BytesIO(pdf))
+    text = "\n".join(page.extract_text() or "" for page in reader.pages)
+
+    assert len(reader.pages) > 2
+    assert "INTERNET_BOSHI" in text
+    assert "INTERNET_OXIRI" in text
+    assert "ICHKI_BOSHI" in text
+    assert "ICHKI_OXIRI" in text
+    assert "davomi" in text
