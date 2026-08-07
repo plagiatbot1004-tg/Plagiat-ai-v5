@@ -1,6 +1,15 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -34,8 +43,8 @@ class Submission(Base):
     raw_text: Mapped[str] = mapped_column(Text)
     normalized_text: Mapped[str] = mapped_column(Text)
     word_count: Mapped[int] = mapped_column(Integer)
-    # Legacy schema fields. V5 does not calculate internal similarity and always
-    # writes zero here so existing Railway PostgreSQL databases remain compatible.
+    # Reused by V6 for the final de-duplicated multi-source result. Keeping the
+    # existing columns means Railway PostgreSQL needs no destructive migration.
     originality_score: Mapped[float] = mapped_column(Float)
     plagiarism_score: Mapped[float] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(
