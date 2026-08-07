@@ -28,6 +28,7 @@ from app.services.ai_risk import AIStyleAssessment, language_name
 from app.services.assessment import build_professional_conclusion
 from app.services.internal_similarity import MultiSourceResult
 from app.services.quetext import InternetScanResult
+from app.services.unicode_safety import html_fragment_to_text
 
 NAVY = colors.HexColor("#123B5D")
 TURQUOISE = colors.HexColor("#1F8E8A")
@@ -551,7 +552,9 @@ def build_report(
             similarity_text = f"{source.matched_words} so‘z"
             if source.similarity is not None:
                 similarity_text += f"<br/><b>{source.similarity:.2f}%</b>"
-            snippet_chunks = _split_table_fragment(source.introduction or "")
+            snippet_chunks = _split_table_fragment(
+                html_fragment_to_text(source.introduction or "")
+            )
             for chunk_number, snippet in enumerate(snippet_chunks, start=1):
                 first_chunk = chunk_number == 1
                 source_cell = (
